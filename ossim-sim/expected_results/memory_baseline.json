@@ -1,0 +1,97 @@
+{
+  "input": "inputs/trace_baseline.txt",
+  "page_size": 4096,
+  "frames": 3,
+  "pid": "P1",
+  "pages": [
+    0,
+    1,
+    0,
+    2,
+    3,
+    0,
+    1,
+    4,
+    0,
+    2
+  ],
+  "hit_cost_ms": 0.1,
+  "fault_cost_ms": 5.0,
+  "status": "TO BE HAND-VERIFIED by Copernick before submission",
+  "FIFO": {
+    "results": [
+      "F",
+      "F",
+      "H",
+      "F",
+      "F",
+      "F",
+      "F",
+      "F",
+      "H",
+      "F"
+    ],
+    "evicted": [
+      null,
+      null,
+      null,
+      null,
+      0,
+      1,
+      2,
+      3,
+      null,
+      0
+    ],
+    "references": 10,
+    "hits": 2,
+    "faults": 8,
+    "evictions": 5,
+    "hit_rate": 0.2,
+    "fault_rate": 0.8,
+    "avg_access_ms": 4.02,
+    "final_frames": [
+      1,
+      4,
+      2
+    ]
+  },
+  "LRU": {
+    "results": [
+      "F",
+      "F",
+      "H",
+      "F",
+      "F",
+      "H",
+      "F",
+      "F",
+      "H",
+      "F"
+    ],
+    "evicted": [
+      null,
+      null,
+      null,
+      null,
+      1,
+      null,
+      2,
+      3,
+      null,
+      1
+    ],
+    "references": 10,
+    "hits": 3,
+    "faults": 7,
+    "evictions": 4,
+    "hit_rate": 0.3,
+    "fault_rate": 0.7,
+    "avg_access_ms": 3.53,
+    "final_frames": [
+      0,
+      4,
+      2
+    ]
+  }
+}

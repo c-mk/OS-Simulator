@@ -1,0 +1,13 @@
+# Baseline file-system script (spec 6.1, /docs/notes.txt). 12 commands incl. 3 expected errors.
+mkdir /docs
+mkfile /docs/notes.txt
+write /docs/notes.txt "Hello"
+append /docs/notes.txt " OS"
+cat /docs/notes.txt
+ls /docs
+mkdir /docs
+cat /docs/missing.txt
+rmdir /docs
+rm /docs/notes.txt
+rmdir /docs
+ls /

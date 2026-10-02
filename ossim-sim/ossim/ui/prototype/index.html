@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OS Simulator Dashboard — Milestone 1 Prototype</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2330;--muted:#5d6676;--line:#d9dde4;--acc:#2f6fdb;--ok:#1f8a4c;--warn:#b26a00;--bad:#c23b3b;
+--p1:#2f6fdb;--p2:#e0702b;--p3:#1d9e74;--p4:#b8860b;--cs:#555;--idle:#bbb}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#162033;color:#fff;flex-wrap:wrap}
+header h1{font-size:16px;margin:0 12px 0 0}header .ctl button,header select,header input{font:inherit;padding:5px 10px;border-radius:6px;border:1px solid #3b4a66;background:#22304a;color:#fff}
+header .ctl button:focus-visible,nav button:focus-visible,main button:focus-visible{outline:3px solid #ffbf47;outline-offset:2px}
+header .state{margin-left:auto;font-size:13px;opacity:.9}
+.wrap{display:flex;min-height:calc(100vh - 52px)}
+nav{width:210px;background:#fff;border-right:1px solid var(--line);padding:10px 8px;flex-shrink:0}
+nav .grp{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:12px 8px 4px}
+nav button{display:block;width:100%;text-align:left;border:0;background:none;padding:7px 10px;border-radius:6px;font:inherit;color:var(--ink);cursor:pointer}
+nav button[aria-current=page]{background:#e7efff;color:var(--acc);font-weight:600}
+main{flex:1;padding:18px 22px;min-width:0}
+h2{margin:0 0 4px;font-size:20px}.sub{color:var(--muted);margin:0 0 14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card h3{margin:0 0 6px;font-size:14px}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
+.badge{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;border:1px solid}
+.b-ok{color:var(--ok);border-color:var(--ok)}.b-warn{color:var(--warn);border-color:var(--warn)}.b-todo{color:var(--muted);border-color:var(--line)}
+table{border-collapse:collapse;width:100%;background:#fff}th,td{border:1px solid var(--line);padding:5px 8px;text-align:left;font-size:13px}th{background:#f0f2f6}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+select,input[type=number],input[type=text]{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.btn{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--acc);background:var(--acc);color:#fff;cursor:pointer}
+.btn.ghost{background:#fff;color:var(--acc)}
+.note{background:#fff8e6;border:1px solid #f0d58a;border-radius:8px;padding:8px 12px;margin:10px 0;font-size:13px}
+.gantt{position:relative;height:46px;border:1px solid var(--line);background:#fff;border-radius:6px;margin:6px 0 22px}
+.seg{position:absolute;top:0;bottom:0;color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;border-right:1px solid #fff}
+.tick{position:absolute;top:48px;font-size:11px;color:var(--muted);transform:translateX(-50%)}
+.frames td.f{background:#ffecec}.frames td.h{background:#e9f7ef}
+.tabs button{font:inherit;padding:6px 12px;border:1px solid var(--line);background:#fff;border-radius:6px 6px 0 0;cursor:pointer}
+.tabs button[aria-selected=true]{border-bottom-color:#fff;font-weight:600;color:var(--acc)}
+.tree{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+.err{color:var(--bad);font-size:13px;margin-top:4px}
+.bar{height:18px;background:var(--acc);border-radius:3px}
+#toast{position:fixed;bottom:16px;right:16px;background:#162033;color:#fff;padding:10px 14px;border-radius:8px;opacity:0;transition:.2s;max-width:340px}
+#toast.show{opacity:1}
+.sr{position:absolute;left:-9999px}
+</style></head><body>
+<header>
+ <h1>OS Simulator</h1>
+ <div class="ctl" role="toolbar" aria-label="Simulation controls">
+  <button data-act="Run">▶ Run</button> <button data-act="Pause">⏸ Pause</button> <button data-act="Step">⏭ Step</button> <button data-act="Reset">↺ Reset</button>
+  <label class="sr" for="speed">Speed</label><select id="speed"><option>1×</option><option>2×</option><option>5×</option><option>Max</option></select>
+  <label class="sr" for="seed">Seed</label><input id="seed" type="number" value="42" style="width:80px;background:#22304a;color:#fff;border-color:#3b4a66" aria-label="Seed">
+  <select aria-label="Stop condition"><option>Stop: all done</option><option>Stop: t = 100 ms</option><option>Stop: 1000 events</option></select>
+  <button data-act="Batch">Batch…</button>
+ </div>
+ <div class="state">Scenario: <b>baseline-01</b> · t = <b id="clock">0.0</b> ms · State: <b id="runstate">Ready</b></div>
+</header>
+<div class="wrap">
+<nav aria-label="Main">
+ <div class="grp">System</div>
+ <button data-page="overview" aria-current="page">Overview</button>
+ <div class="grp">Managers</div>
+ <button data-page="process">Process</button><button data-page="memory">Memory</button><button data-page="file">File</button>
+ <button data-page="security">Security</button><button data-page="device">Device</button><button data-page="network">Network</button>
+ <button data-page="parallel">Parallel</button>
+ <div class="grp">Workflow</div>
+ <button data-page="scenario">Scenario builder</button><button data-page="testing">Testing center</button>
+ <button data-page="compare">Comparison center</button><button data-page="events">Event explorer</button><button data-page="export">Export</button>
+</nav>
+<main id="main" tabindex="-1"></main>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+const EXP = {"process": {"input": "inputs/process_baseline.csv", "time_unit": "ms (1 ms = 10 ticks)", "context_switch_ms": 0, "tie_breakers": "earlier arrival, then input order; RR requeues the expired process after same-time arrivals; preemption only when strictly better; lower priority number = higher priority", "status": "TO BE HAND-VERIFIED by Copernick before submission", "algorithms": {"fcfs": {"gantt": [{"pid": "P1", "start": 0, "end": 8}, {"pid": "P2", "start": 8, "end": 12}, {"pid": "P3", "start": 12, "end": 21}, {"pid": "P4", "start": 21, "end": 26}], "per_process": {"P1": {"start": 0, "completion": 8, "turnaround": 8, "waiting": 0, "response": 0, "dispatches": 1}, "P2": {"start": 8, "completion": 12, "turnaround": 11, "waiting": 7, "response": 7, "dispatches": 1}, "P3": {"start": 12, "completion": 21, "turnaround": 19, "waiting": 10, "response": 10, "dispatches": 1}, "P4": {"start": 21, "completion": 26, "turnaround": 23, "waiting": 18, "response": 18, "dispatches": 1}}, "averages": {"turnaround": 15.25, "waiting": 8.75, "response": 8.75}, "makespan": 26, "cpu_utilization_pct": 100.0, "idle": 0, "context_switch_time": 0}, "sjf": {"gantt": [{"pid": "P1", "start": 0, "end": 8}, {"pid": "P2", "start": 8, "end": 12}, {"pid": "P4", "start": 12, "end": 17}, {"pid": "P3", "start": 17, "end": 26}], "per_process": {"P1": {"start": 0, "completion": 8, "turnaround": 8, "waiting": 0, "response": 0, "dispatches": 1}, "P2": {"start": 8, "completion": 12, "turnaround": 11, "waiting": 7, "response": 7, "dispatches": 1}, "P3": {"start": 17, "completion": 26, "turnaround": 24, "waiting": 15, "response": 15, "dispatches": 1}, "P4": {"start": 12, "completion": 17, "turnaround": 14, "waiting": 9, "response": 9, "dispatches": 1}}, "averages": {"turnaround": 14.25, "waiting": 7.75, "response": 7.75}, "makespan": 26, "cpu_utilization_pct": 100.0, "idle": 0, "context_switch_time": 0}, "srtf": {"gantt": [{"pid": "P1", "start": 0, "end": 1}, {"pid": "P2", "start": 1, "end": 5}, {"pid": "P4", "start": 5, "end": 10}, {"pid": "P1", "start": 10, "end": 17}, {"pid": "P3", "start": 17, "end": 26}], "per_process": {"P1": {"start": 0, "completion": 17, "turnaround": 17, "waiting": 9, "response": 0, "dispatches": 2}, "P2": {"start": 1, "completion": 5, "turnaround": 4, "waiting": 0, "response": 0, "dispatches": 1}, "P3": {"start": 17, "completion": 26, "turnaround": 24, "waiting": 15, "response": 15, "dispatches": 1}, "P4": {"start": 5, "completion": 10, "turnaround": 7, "waiting": 2, "response": 2, "dispatches": 1}}, "averages": {"turnaround": 13.0, "waiting": 6.5, "response": 4.25}, "makespan": 26, "cpu_utilization_pct": 100.0, "idle": 0, "context_switch_time": 0}, "rr_q4": {"gantt": [{"pid": "P1", "start": 0, "end": 4}, {"pid": "P2", "start": 4, "end": 8}, {"pid": "P3", "start": 8, "end": 12}, {"pid": "P4", "start": 12, "end": 16}, {"pid": "P1", "start": 16, "end": 20}, {"pid": "P3", "start": 20, "end": 24}, {"pid": "P4", "start": 24, "end": 25}, {"pid": "P3", "start": 25, "end": 26}], "per_process": {"P1": {"start": 0, "completion": 20, "turnaround": 20, "waiting": 12, "response": 0, "dispatches": 2}, "P2": {"start": 4, "completion": 8, "turnaround": 7, "waiting": 3, "response": 3, "dispatches": 1}, "P3": {"start": 8, "completion": 26, "turnaround": 24, "waiting": 15, "response": 6, "dispatches": 3}, "P4": {"start": 12, "completion": 25, "turnaround": 22, "waiting": 17, "response": 9, "dispatches": 2}}, "averages": {"turnaround": 18.25, "waiting": 11.75, "response": 4.5}, "makespan": 26, "cpu_utilization_pct": 100.0, "idle": 0, "context_switch_time": 0}, "priority_np": {"gantt": [{"pid": "P1", "start": 0, "end": 8}, {"pid": "P2", "start": 8, "end": 12}, {"pid": "P4", "start": 12, "end": 17}, {"pid": "P3", "start": 17, "end": 26}], "per_process": {"P1": {"start": 0, "completion": 8, "turnaround": 8, "waiting": 0, "response": 0, "dispatches": 1}, "P2": {"start": 8, "completion": 12, "turnaround": 11, "waiting": 7, "response": 7, "dispatches": 1}, "P3": {"start": 17, "completion": 26, "turnaround": 24, "waiting": 15, "response": 15, "dispatches": 1}, "P4": {"start": 12, "completion": 17, "turnaround": 14, "waiting": 9, "response": 9, "dispatches": 1}}, "averages": {"turnaround": 14.25, "waiting": 7.75, "response": 7.75}, "makespan": 26, "cpu_utilization_pct": 100.0, "idle": 0, "context_switch_time": 0}, "priority_p_no_aging": {"gantt": [{"pid": "P1", "start": 0, "end": 1}, {"pid": "P2", "start": 1, "end": 5}, {"pid": "P4", "start": 5, "end": 10}, {"pid": "P1", "start": 10, "end": 17}, {"pid": "P3", "start": 17, "end": 26}], "per_process": {"P1": {"start": 0, "completion": 17, "turnaround": 17, "waiting": 9, "response": 0, "dispatches": 2}, "P2": {"start": 1, "completion": 5, "turnaround": 4, "waiting": 0, "response": 0, "dispatches": 1}, "P3": {"start": 17, "completion": 26, "turnaround": 24, "waiting": 15, "response": 15, "dispatches": 1}, "P4": {"start": 5, "completion": 10, "turnaround": 7, "waiting": 2, "response": 2, "dispatches": 1}}, "averages": {"turnaround": 13.0, "waiting": 6.5, "response": 4.25}, "makespan": 26, "cpu_utilization_pct": 100.0, "idle": 0, "context_switch_time": 0}}}, "memory": {"input": "inputs/trace_baseline.txt", "page_size": 4096, "frames": 3, "pid": "P1", "pages": [0, 1, 0, 2, 3, 0, 1, 4, 0, 2], "hit_cost_ms": 0.1, "fault_cost_ms": 5.0, "status": "TO BE HAND-VERIFIED by Copernick before submission", "FIFO": {"results": ["F", "F", "H", "F", "F", "F", "F", "F", "H", "F"], "evicted": [null, null, null, null, 0, 1, 2, 3, null, 0], "references": 10, "hits": 2, "faults": 8, "evictions": 5, "hit_rate": 0.2, "fault_rate": 0.8, "avg_access_ms": 4.02, "final_frames": [1, 4, 2]}, "LRU": {"results": ["F", "F", "H", "F", "F", "H", "F", "F", "H", "F"], "evicted": [null, null, null, null, 1, null, 2, 3, null, 1], "references": 10, "hits": 3, "faults": 7, "evictions": 4, "hit_rate": 0.3, "fault_rate": 0.7, "avg_access_ms": 3.53, "final_frames": [0, 4, 2]}}, "file": {"input": "inputs/fs_baseline.txt", "status": "TO BE HAND-VERIFIED by Liberty before submission", "steps": [{"cmd": "mkdir /docs", "ok": true, "output": ""}, {"cmd": "mkfile /docs/notes.txt", "ok": true, "output": ""}, {"cmd": "write /docs/notes.txt \"Hello\"", "ok": true, "output": "", "bytes_written": 5}, {"cmd": "append /docs/notes.txt \" OS\"", "ok": true, "output": "", "bytes_written": 3}, {"cmd": "cat /docs/notes.txt", "ok": true, "output": "Hello OS", "bytes_read": 8}, {"cmd": "ls /docs", "ok": true, "output": "notes.txt"}, {"cmd": "mkdir /docs", "ok": false, "error": "already exists: /docs"}, {"cmd": "cat /docs/missing.txt", "ok": false, "error": "no such file: /docs/missing.txt"}, {"cmd": "rmdir /docs", "ok": false, "error": "directory not empty: /docs"}, {"cmd": "rm /docs/notes.txt", "ok": true, "output": ""}, {"cmd": "rmdir /docs", "ok": true, "output": ""}, {"cmd": "ls /", "ok": true, "output": ""}], "totals": {"commands": 12, "succeeded": 9, "failed": 3, "bytes_written": 8, "bytes_read": 8, "dirs_created": 1, "files_created": 1, "files_deleted": 1, "dirs_deleted": 1, "final_storage_bytes": 0}, "final_tree": {"name": "/", "is_dir": true, "children": []}}};
+const PROC = [["P1",0,8,3],["P2",1,4,1],["P3",2,9,4],["P4",3,5,2]];
+const COL = {P1:"var(--p1)",P2:"var(--p2)",P3:"var(--p3)",P4:"var(--p4)"};
+const ALGS = {fcfs:"FCFS",sjf:"SJF (non-preemptive)",srtf:"SRTF",rr_q4:"Round-Robin (q = 4 ms)",priority_np:"Priority (non-preemptive)",priority_p_no_aging:"Priority (preemptive, aging off)"};
+const $ = s => document.querySelector(s);
+function toast(t){const e=$("#toast");e.textContent=t;e.classList.add("show");clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("show"),2600)}
+document.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>{ $("#runstate").textContent={Run:"Running",Pause:"Paused",Step:"Stepped",Reset:"Ready",Batch:"Batch (prototype)"}[b.dataset.act];
+  if(b.dataset.act==="Reset") $("#clock").textContent="0.0"; toast(b.dataset.act+": control layout only. The controller is wired up in Milestone 2.");});
+const protoNote = what => `<div class="note"><b>Prototype:</b> ${what}</div>`;
+function gantt(segs, total){
+  let h=`<div class="gantt" role="img" aria-label="CPU Gantt chart">`;
+  const ticks=new Set([0,total]);
+  segs.forEach(s=>{ticks.add(s.start);ticks.add(s.end);h+=`<div class="seg" style="left:${s.start/total*100}%;width:${(s.end-s.start)/total*100}%;background:${COL[s.pid]||"var(--cs)"}" title="${s.pid} ${s.start}–${s.end} ms">${s.pid}</div>`});
+  [...ticks].forEach(t=>h+=`<span class="tick" style="left:${t/total*100}%">${t}</span>`);
+  return h+`</div>`;
+}
+function ptable(res){
+  let h=`<table><caption class="sr">Per-process metrics</caption><tr><th>PID</th><th>Start</th><th>Completion</th><th>Turnaround</th><th>Waiting</th><th>Response</th><th>Dispatches</th></tr>`;
+  for(const [p,m] of Object.entries(res.per_process)) h+=`<tr><td>${p}</td><td>${m.start}</td><td>${m.completion}</td><td>${m.turnaround}</td><td>${m.waiting}</td><td>${m.response}</td><td>${m.dispatches}</td></tr>`;
+  const a=res.averages; return h+`<tr><th>Average</th><td></td><td></td><th>${a.turnaround.toFixed(2)}</th><th>${a.waiting.toFixed(2)}</th><th>${a.response.toFixed(2)}</th><td></td></tr></table>`;
+}
+const placeholder = (title, owner, ms, panels) => `<h2>${title}</h2><p class="sub">Owner: ${owner} · Built in ${ms}</p>${protoNote("final layout of this workspace. Panels show what each area will contain; data appears when the manager is implemented.")}
+ <div class="grid">${panels.map(p=>`<div class="card"><h3>${p[0]}</h3><p class="sub" style="margin:0">${p[1]}</p></div>`).join("")}</div>`;
+const PAGES = {
+overview: () => `<h2>Overview</h2><p class="sub">Health of each manager, current run and warnings</p>
+ <div class="grid">${[["Process","Copernick","M2"],["Memory","Copernick","M3"],["File","Liberty","M3"],["Security","Liberty","M4"],["Device","Arian","M4"],["Network","Arian","M4"],["Parallel","Rasheed","M4"]].map(m=>
+ `<div class="card"><h3>${m[0]} manager</h3><span class="badge b-todo">○ Not built</span><p class="sub" style="margin:6px 0 0">Owner ${m[1]} · due ${m[2]}</p></div>`).join("")}</div>
+ <div class="row" style="margin-top:14px"><div class="card" style="flex:1"><h3>Run summary</h3>Scenario <b>baseline-01</b> · seed 42 · 0 events · 0 warnings</div>
+ <div class="card" style="flex:1"><h3>Warnings</h3><span class="badge b-warn">! 1 warning</span> Prototype build: managers are not connected yet.</div></div>`,
+process: () => `<h2>Process manager</h2><p class="sub">Owner: Copernick · CPU scheduling (spec 4.1)</p>
+ ${protoNote("Run shows the hand-calculated values from <code>expected_results/process_baseline.json</code>, not live simulator output. The simulator replaces them in Milestone 2.")}
+ <div class="row"><div><label for="alg">Policy</label><select id="alg">${Object.entries(ALGS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select></div>
+ <div><label for="q">Quantum q (ms)</label><input id="q" type="number" value="4" min="1" style="width:80px"></div>
+ <div><label for="cs">Context switch (ms)</label><input id="cs" type="number" value="0" step="0.1" min="0" style="width:80px"></div>
+ <div><label>&nbsp;</label><button class="btn" id="prun">Run</button> <button class="btn ghost" onclick="toast('Process unit tests run from the Testing center in M2')">Test</button></div></div>
+ <h3 style="margin-top:16px">Input workload</h3><table><tr><th>PID</th><th>Arrival (ms)</th><th>Burst (ms)</th><th>Priority</th></tr>${PROC.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</table>
+ <div id="pout"></div>`,
+memory: () => `<h2>Memory manager</h2><p class="sub">Owner: Copernick · Paging, FIFO vs LRU (spec 4.2)</p>
+ ${protoNote("values come from <code>expected_results/memory_baseline.json</code> (page size 4096 B, 3 frames).")}
+ <div class="row"><div><label for="mp">Policy</label><select id="mp"><option>FIFO</option><option>LRU</option></select></div><div><label>&nbsp;</label><button class="btn" id="mrun">Run</button></div></div><div id="mout"></div>`,
+file: () => { const e=EXP.file; return `<h2>File manager</h2><p class="sub">Owner: Liberty · In-memory hierarchical file system (spec 4.3)</p>
+ ${protoNote("operation log from <code>expected_results/file_baseline.json</code>.")}
+ <div class="row"><div class="card" style="min-width:220px"><h3>File tree (after step 6)</h3><div class="tree">/<br>└── docs/<br>&nbsp;&nbsp;&nbsp;&nbsp;└── notes.txt &nbsp;(8 B)</div></div>
+ <div class="card"><h3>Metadata: /docs/notes.txt</h3>owner: alice · mode rw-r----- · size 8 B · open handles 0</div></div>
+ <h3>Operation log</h3><table><tr><th>#</th><th>Command</th><th>Result</th><th>Output / error</th></tr>${e.steps.map((s,i)=>`<tr><td>${i+1}</td><td><code>${s.cmd}</code></td><td>${s.ok?'<span class="badge b-ok">✓ ok</span>':'<span class="badge b-warn">✗ error</span>'}</td><td>${s.ok?(s.output||""):s.error}</td></tr>`).join("")}</table>`},
+security: () => placeholder("Security manager","Liberty","Milestone 4",[["Session","Login/logout with demo users (no real passwords)"],["Permission matrix","Users × resources, rwx per cell, text labels"],["Audit log","Append-only, filterable by severity and outcome"],["Alerts","Repeated failed logins, forbidden access"],["Severity chart","Events by info / warning / critical"]]),
+device: () => placeholder("Device manager","Arian","Milestone 4",[["Devices","Disk, printer, keyboard with status: available / busy / offline / error"],["Queues","Per-device request queue, FCFS"],["Disk policy","FCFS, SSTF, SCAN/C-SCAN"],["Disk-head plot","Cylinder vs time"],["Request timeline","Arrival, start, completion, outcome"]]),
+network: () => placeholder("Network manager","Arian","Milestone 4",[["Topology","Nodes, links, status and cost; route highlighted"],["Queues","FIFO vs priority / WRR"],["Packet timeline","Created, sent, delivered, dropped"],["Link utilization","Per link over time"],["Drop reasons","Buffer full, TTL expired, unreachable"]]),
+parallel: () => placeholder("Parallel computing","Rasheed (backup Copernick)","Milestone 4",[["Cores","1, 2 or 4 simulated cores"],["Distribution","Global ready queue vs least-loaded"],["Multicore Gantt","One lane per core"],["Synchronization","Mutex, semaphore/barrier timeline; race demo safe vs unsafe"],["Speedup / efficiency","T1/Tp and speedup/p by core count"],["Deadlock","Detected tasks and resources"]]),
+scenario: () => `<h2>Scenario builder</h2><p class="sub">Create and edit every input type; validation runs before saving</p>
+ <div class="tabs" role="tablist">${["Processes","Address trace","File script","Users & policies","Device requests","Packets & links","Failure events"].map((t,i)=>`<button role="tab" aria-selected="${i===0}" data-tab="${i}">${t}</button>`).join("")}</div>
+ <div class="card" style="border-radius:0 8px 8px 8px"><div id="tabbody"></div></div>`,
+testing: () => `<h2>Testing center</h2><p class="sub">Run unit suites, integration scenarios and boundary/failure cases</p>
+ ${protoNote("results layout only. Suites run with pytest today; dashboard hook-up is Milestone 2. Nothing below is a real result.")}
+ <div class="row" style="margin-bottom:10px"><select aria-label="Suite"><option>All suites</option><option>Unit: process</option><option>Unit: memory</option><option>Unit: file</option><option>Integration</option><option>Invalid input</option><option>Stress</option></select> <button class="btn" onclick="toast('Run tests: wired in Milestone 2')">Run selected</button></div>
+ <table><tr><th>Test</th><th>Suite</th><th>Status</th><th>Expected</th><th>Actual</th><th>Diagnostics</th></tr>
+ ${[["T-BASE-01 process baseline","Unit"],["T-BASE-02 memory baseline","Unit"],["T-BASE-03 file baseline","Unit"],["T-API-01 manager interface","Contract"],["T-EV-01 event schema","Contract"],["T-INV-01 malformed CSV","Invalid input"],["T-INT-03 block/unblock","Integration"]].map(t=>`<tr><td>${t[0]}</td><td>${t[1]}</td><td><span class="badge b-todo">○ not run</span></td><td>—</td><td>—</td><td>—</td></tr>`).join("")}</table>`,
+compare: () => { const rows=Object.entries(ALGS).map(([k,v])=>[v,EXP.process.algorithms[k].averages]); const mx=Math.max(...rows.map(r=>r[1].waiting));
+ return `<h2>Comparison center</h2><p class="sub">Same input, several policies, side by side</p>${protoNote("expected values for the baseline workload, cs = 0.")}
+ <table><tr><th>Policy</th><th>Avg waiting (ms)</th><th>Avg turnaround (ms)</th><th>Avg response (ms)</th><th style="width:35%">Avg waiting (bar)</th></tr>
+ ${rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1].waiting.toFixed(2)}</td><td>${r[1].turnaround.toFixed(2)}</td><td>${r[1].response.toFixed(2)}</td><td><div class="bar" style="width:${r[1].waiting/mx*100}%" aria-hidden="true"></div></td></tr>`).join("")}</table>`},
+events: () => `<h2>Event explorer</h2><p class="sub">Filter by time, manager, entity, event, outcome, severity, correlation ID</p>
+ ${protoNote("sample rows show the event schema; they are not simulator output.")}
+ <div class="row" style="margin-bottom:10px"><input type="text" placeholder="Search…" aria-label="Search"><select aria-label="Manager"><option>All managers</option><option>process</option><option>memory</option><option>file</option><option>security</option><option>device</option><option>network</option><option>parallel</option></select>
+ <select aria-label="Outcome"><option>Any outcome</option><option>ok</option><option>denied</option><option>failed</option><option>error</option></select><select aria-label="Severity"><option>Any severity</option><option>info</option><option>warning</option><option>critical</option></select><input type="text" placeholder="Correlation ID" aria-label="Correlation ID"></div>
+ <table><tr><th>seq</th><th>t (ms)</th><th>Manager</th><th>Event</th><th>Entity</th><th>Prev → new</th><th>Outcome</th><th>Severity</th><th>Correlation</th><th>Message</th></tr>
+ <tr><td>1</td><td>0.0</td><td>process</td><td>ARRIVE</td><td>P1</td><td>new → ready</td><td>ok</td><td>info</td><td>baseline-01</td><td>sample</td></tr>
+ <tr><td>2</td><td>0.0</td><td>process</td><td>DISPATCH</td><td>P1</td><td>ready → running</td><td>ok</td><td>info</td><td>baseline-01</td><td>sample</td></tr>
+ <tr><td>3</td><td>1.0</td><td>security</td><td>AUTHORIZE</td><td>bob:/docs/notes.txt</td><td>— → —</td><td>denied</td><td>warning</td><td>P2-fs-1</td><td>sample: write denied</td></tr></table>`,
+export: () => `<h2>Export</h2><p class="sub">Save configuration, event log, per-manager CSV, charts and summary (no host data)</p>
+ <div class="grid">${["Configuration (JSON)","Event log (CSV / JSON)","Process metrics (CSV)","Memory results (CSV)","File log (CSV)","Charts (SVG/PNG)","Summary report (Markdown)"].map(x=>`<div class="card"><h3>${x}</h3><button class="btn ghost" onclick="toast('Export: Milestone 2+')">Export</button></div>`).join("")}</div>`
+};
+const TABS=[
+ ()=>`<table><tr><th>PID</th><th>Arrival</th><th>Burst</th><th>Priority</th></tr>${PROC.map(r=>`<tr>${r.map(c=>`<td contenteditable="true">${c}</td>`).join("")}</tr>`).join("")}</table>
+   <div class="row" style="margin-top:8px"><button class="btn ghost" id="addrow">+ Add process</button><button class="btn" id="validate">Validate</button></div><div id="verr" role="alert"></div>`,
+ ()=>`<label for="tr">Addresses (hex or decimal, one per line)</label><textarea id="tr" rows="6" cols="30">0x0040\n0x10A0\n0x0044\n0x20B0</textarea>`,
+ ()=>`<label for="fsx">Commands</label><textarea id="fsx" rows="6" cols="50">mkdir /docs\nmkfile /docs/notes.txt\nwrite /docs/notes.txt "Hello"</textarea>`,
+ ()=>`<p>Users, roles and rwx grants. <span class="badge b-todo">Milestone 4</span></p>`,
+ ()=>`<p>Device, request time, cylinder, owning process. <span class="badge b-todo">Milestone 4</span></p>`,
+ ()=>`<p>Nodes, links (bandwidth, delay, cost), packets. <span class="badge b-todo">Milestone 4</span></p>`,
+ ()=>`<p>At time t: device offline / link down / recover. <span class="badge b-todo">Milestone 4</span></p>`];
+function show(page){
+  document.querySelectorAll("nav button").forEach(b=>{ if(b.dataset.page===page) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current"); });
+  $("#main").innerHTML=PAGES[page](); $("#main").focus();
+  if(page==="process"){ $("#prun").onclick=()=>{const k=$("#alg").value,r=EXP.process.algorithms[k];
+     if(+$("#cs").value<0){toast("Context-switch cost cannot be negative");return}
+     $("#pout").innerHTML=`<h3 style="margin-top:16px">${ALGS[k]}: CPU Gantt chart (ms)</h3>`+gantt(r.gantt,r.makespan)+ptable(r)+`<p class="sub">Makespan ${r.makespan} ms · CPU utilization ${r.cpu_utilization_pct}% · idle ${r.idle} ms · context-switch time ${r.context_switch_time} ms</p>`; }; $("#prun").click(); }
+  if(page==="memory"){ $("#mrun").onclick=()=>{const m=EXP.memory, r=m[$("#mp").value]; const fr=[];let rows="";
+     m.pages.forEach((p,i)=>{ if(r.results[i]==="F"){ if(r.evicted[i]!==null) fr.splice(fr.indexOf(r.evicted[i]),1,p); else fr.push(p);} 
+       rows+=`<tr><td>${i+1}</td><td>0x${[0x0040,0x10A0,0x0044,0x20B0,0x3010,0x0048,0x10A4,0x4000,0x0050,0x20B4][i].toString(16).toUpperCase().padStart(4,"0")}</td><td>${p}</td>${[0,1,2].map(j=>`<td>${fr[j]??""}</td>`).join("")}<td class="${r.results[i]==="H"?"h":"f"}">${r.results[i]==="H"?"Hit":"Fault"}</td><td>${r.evicted[i]??""}</td></tr>`;});
+     $("#mout").innerHTML=`<table class="frames" style="margin-top:12px"><tr><th>#</th><th>Address</th><th>Page</th><th>Frame 0</th><th>Frame 1</th><th>Frame 2</th><th>Result</th><th>Evicted</th></tr>${rows}</table>
+     <p class="sub">${r.hits} hits · ${r.faults} faults · ${r.evictions} evictions · fault rate ${(r.fault_rate*100).toFixed(0)}% · avg access ${r.avg_access_ms.toFixed(2)} ms</p>`;}; $("#mrun").click(); }
+  if(page==="scenario"){ const sel=i=>{document.querySelectorAll("[role=tab]").forEach(t=>t.setAttribute("aria-selected",t.dataset.tab==i)); $("#tabbody").innerHTML=TABS[i]();
+     if(i==0){ $("#addrow").onclick=()=>{$("#tabbody table").insertAdjacentHTML("beforeend",`<tr><td contenteditable>P5</td><td contenteditable>4</td><td contenteditable>-2</td><td contenteditable>1</td></tr>`)};
+       $("#validate").onclick=()=>{const errs=[],seen=new Set();[...$("#tabbody table").rows].slice(1).forEach((tr,i)=>{const c=[...tr.cells].map(x=>x.textContent.trim());
+         if(seen.has(c[0]))errs.push(`Row ${i+1}: duplicate PID ${c[0]}`);seen.add(c[0]);
+         if(!/^-?\d+$/.test(c[1])||+c[1]<0)errs.push(`Row ${i+1}: arrival must be an integer ≥ 0`);
+         if(!/^-?\d+$/.test(c[2])||+c[2]<=0)errs.push(`Row ${i+1}: burst must be an integer > 0`);});
+         $("#verr").innerHTML=errs.length?errs.map(e=>`<div class="err">✗ ${e}</div>`).join(""):`<div style="color:var(--ok)">✓ Valid. Nothing was changed until you save.</div>`;};}};
+     document.querySelectorAll("[role=tab]").forEach(t=>t.onclick=()=>sel(+t.dataset.tab)); sel(0); }
+}
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>show(b.dataset.page));
+show("overview");
+</script></body></html>
