@@ -1,0 +1,86 @@
+{
+  "input": "inputs/fs_baseline.txt",
+  "status": "TO BE HAND-VERIFIED by Liberty before submission",
+  "steps": [
+    {
+      "cmd": "mkdir /docs",
+      "ok": true,
+      "output": ""
+    },
+    {
+      "cmd": "mkfile /docs/notes.txt",
+      "ok": true,
+      "output": ""
+    },
+    {
+      "cmd": "write /docs/notes.txt \"Hello\"",
+      "ok": true,
+      "output": "",
+      "bytes_written": 5
+    },
+    {
+      "cmd": "append /docs/notes.txt \" OS\"",
+      "ok": true,
+      "output": "",
+      "bytes_written": 3
+    },
+    {
+      "cmd": "cat /docs/notes.txt",
+      "ok": true,
+      "output": "Hello OS",
+      "bytes_read": 8
+    },
+    {
+      "cmd": "ls /docs",
+      "ok": true,
+      "output": "notes.txt"
+    },
+    {
+      "cmd": "mkdir /docs",
+      "ok": false,
+      "error": "already exists: /docs"
+    },
+    {
+      "cmd": "cat /docs/missing.txt",
+      "ok": false,
+      "error": "no such file: /docs/missing.txt"
+    },
+    {
+      "cmd": "rmdir /docs",
+      "ok": false,
+      "error": "directory not empty: /docs"
+    },
+    {
+      "cmd": "rm /docs/notes.txt",
+      "ok": true,
+      "output": ""
+    },
+    {
+      "cmd": "rmdir /docs",
+      "ok": true,
+      "output": ""
+    },
+    {
+      "cmd": "ls /",
+      "ok": true,
+      "output": ""
+    }
+  ],
+  "totals": {
+    "commands": 12,
+    "succeeded": 9,
+    "failed": 3,
+    "bytes_written": 8,
+    "bytes_read": 8,
+    "dirs_created": 1,
+    "files_created": 1,
+    "files_deleted": 1,
+    "dirs_deleted": 1,
+    "final_storage_bytes": 0
+  },
+  "final_tree": {
+    "name": "/",
+    "is_dir": true,
+    "children": []
+  }
+}

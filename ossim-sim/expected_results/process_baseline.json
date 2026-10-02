@@ -1,0 +1,441 @@
+{
+  "input": "inputs/process_baseline.csv",
+  "time_unit": "ms (1 ms = 10 ticks)",
+  "context_switch_ms": 0,
+  "tie_breakers": "earlier arrival, then input order; RR requeues the expired process after same-time arrivals; preemption only when strictly better; lower priority number = higher priority",
+  "status": "TO BE HAND-VERIFIED by Copernick before submission",
+  "algorithms": {
+    "fcfs": {
+      "gantt": [
+        {
+          "pid": "P1",
+          "start": 0,
+          "end": 8
+        },
+        {
+          "pid": "P2",
+          "start": 8,
+          "end": 12
+        },
+        {
+          "pid": "P3",
+          "start": 12,
+          "end": 21
+        },
+        {
+          "pid": "P4",
+          "start": 21,
+          "end": 26
+        }
+      ],
+      "per_process": {
+        "P1": {
+          "start": 0,
+          "completion": 8,
+          "turnaround": 8,
+          "waiting": 0,
+          "response": 0,
+          "dispatches": 1
+        },
+        "P2": {
+          "start": 8,
+          "completion": 12,
+          "turnaround": 11,
+          "waiting": 7,
+          "response": 7,
+          "dispatches": 1
+        },
+        "P3": {
+          "start": 12,
+          "completion": 21,
+          "turnaround": 19,
+          "waiting": 10,
+          "response": 10,
+          "dispatches": 1
+        },
+        "P4": {
+          "start": 21,
+          "completion": 26,
+          "turnaround": 23,
+          "waiting": 18,
+          "response": 18,
+          "dispatches": 1
+        }
+      },
+      "averages": {
+        "turnaround": 15.25,
+        "waiting": 8.75,
+        "response": 8.75
+      },
+      "makespan": 26,
+      "cpu_utilization_pct": 100.0,
+      "idle": 0,
+      "context_switch_time": 0
+    },
+    "sjf": {
+      "gantt": [
+        {
+          "pid": "P1",
+          "start": 0,
+          "end": 8
+        },
+        {
+          "pid": "P2",
+          "start": 8,
+          "end": 12
+        },
+        {
+          "pid": "P4",
+          "start": 12,
+          "end": 17
+        },
+        {
+          "pid": "P3",
+          "start": 17,
+          "end": 26
+        }
+      ],
+      "per_process": {
+        "P1": {
+          "start": 0,
+          "completion": 8,
+          "turnaround": 8,
+          "waiting": 0,
+          "response": 0,
+          "dispatches": 1
+        },
+        "P2": {
+          "start": 8,
+          "completion": 12,
+          "turnaround": 11,
+          "waiting": 7,
+          "response": 7,
+          "dispatches": 1
+        },
+        "P3": {
+          "start": 17,
+          "completion": 26,
+          "turnaround": 24,
+          "waiting": 15,
+          "response": 15,
+          "dispatches": 1
+        },
+        "P4": {
+          "start": 12,
+          "completion": 17,
+          "turnaround": 14,
+          "waiting": 9,
+          "response": 9,
+          "dispatches": 1
+        }
+      },
+      "averages": {
+        "turnaround": 14.25,
+        "waiting": 7.75,
+        "response": 7.75
+      },
+      "makespan": 26,
+      "cpu_utilization_pct": 100.0,
+      "idle": 0,
+      "context_switch_time": 0
+    },
+    "srtf": {
+      "gantt": [
+        {
+          "pid": "P1",
+          "start": 0,
+          "end": 1
+        },
+        {
+          "pid": "P2",
+          "start": 1,
+          "end": 5
+        },
+        {
+          "pid": "P4",
+          "start": 5,
+          "end": 10
+        },
+        {
+          "pid": "P1",
+          "start": 10,
+          "end": 17
+        },
+        {
+          "pid": "P3",
+          "start": 17,
+          "end": 26
+        }
+      ],
+      "per_process": {
+        "P1": {
+          "start": 0,
+          "completion": 17,
+          "turnaround": 17,
+          "waiting": 9,
+          "response": 0,
+          "dispatches": 2
+        },
+        "P2": {
+          "start": 1,
+          "completion": 5,
+          "turnaround": 4,
+          "waiting": 0,
+          "response": 0,
+          "dispatches": 1
+        },
+        "P3": {
+          "start": 17,
+          "completion": 26,
+          "turnaround": 24,
+          "waiting": 15,
+          "response": 15,
+          "dispatches": 1
+        },
+        "P4": {
+          "start": 5,
+          "completion": 10,
+          "turnaround": 7,
+          "waiting": 2,
+          "response": 2,
+          "dispatches": 1
+        }
+      },
+      "averages": {
+        "turnaround": 13.0,
+        "waiting": 6.5,
+        "response": 4.25
+      },
+      "makespan": 26,
+      "cpu_utilization_pct": 100.0,
+      "idle": 0,
+      "context_switch_time": 0
+    },
+    "rr_q4": {
+      "gantt": [
+        {
+          "pid": "P1",
+          "start": 0,
+          "end": 4
+        },
+        {
+          "pid": "P2",
+          "start": 4,
+          "end": 8
+        },
+        {
+          "pid": "P3",
+          "start": 8,
+          "end": 12
+        },
+        {
+          "pid": "P4",
+          "start": 12,
+          "end": 16
+        },
+        {
+          "pid": "P1",
+          "start": 16,
+          "end": 20
+        },
+        {
+          "pid": "P3",
+          "start": 20,
+          "end": 24
+        },
+        {
+          "pid": "P4",
+          "start": 24,
+          "end": 25
+        },
+        {
+          "pid": "P3",
+          "start": 25,
+          "end": 26
+        }
+      ],
+      "per_process": {
+        "P1": {
+          "start": 0,
+          "completion": 20,
+          "turnaround": 20,
+          "waiting": 12,
+          "response": 0,
+          "dispatches": 2
+        },
+        "P2": {
+          "start": 4,
+          "completion": 8,
+          "turnaround": 7,
+          "waiting": 3,
+          "response": 3,
+          "dispatches": 1
+        },
+        "P3": {
+          "start": 8,
+          "completion": 26,
+          "turnaround": 24,
+          "waiting": 15,
+          "response": 6,
+          "dispatches": 3
+        },
+        "P4": {
+          "start": 12,
+          "completion": 25,
+          "turnaround": 22,
+          "waiting": 17,
+          "response": 9,
+          "dispatches": 2
+        }
+      },
+      "averages": {
+        "turnaround": 18.25,
+        "waiting": 11.75,
+        "response": 4.5
+      },
+      "makespan": 26,
+      "cpu_utilization_pct": 100.0,
+      "idle": 0,
+      "context_switch_time": 0
+    },
+    "priority_np": {
+      "gantt": [
+        {
+          "pid": "P1",
+          "start": 0,
+          "end": 8
+        },
+        {
+          "pid": "P2",
+          "start": 8,
+          "end": 12
+        },
+        {
+          "pid": "P4",
+          "start": 12,
+          "end": 17
+        },
+        {
+          "pid": "P3",
+          "start": 17,
+          "end": 26
+        }
+      ],
+      "per_process": {
+        "P1": {
+          "start": 0,
+          "completion": 8,
+          "turnaround": 8,
+          "waiting": 0,
+          "response": 0,
+          "dispatches": 1
+        },
+        "P2": {
+          "start": 8,
+          "completion": 12,
+          "turnaround": 11,
+          "waiting": 7,
+          "response": 7,
+          "dispatches": 1
+        },
+        "P3": {
+          "start": 17,
+          "completion": 26,
+          "turnaround": 24,
+          "waiting": 15,
+          "response": 15,
+          "dispatches": 1
+        },
+        "P4": {
+          "start": 12,
+          "completion": 17,
+          "turnaround": 14,
+          "waiting": 9,
+          "response": 9,
+          "dispatches": 1
+        }
+      },
+      "averages": {
+        "turnaround": 14.25,
+        "waiting": 7.75,
+        "response": 7.75
+      },
+      "makespan": 26,
+      "cpu_utilization_pct": 100.0,
+      "idle": 0,
+      "context_switch_time": 0
+    },
+    "priority_p_no_aging": {
+      "gantt": [
+        {
+          "pid": "P1",
+          "start": 0,
+          "end": 1
+        },
+        {
+          "pid": "P2",
+          "start": 1,
+          "end": 5
+        },
+        {
+          "pid": "P4",
+          "start": 5,
+          "end": 10
+        },
+        {
+          "pid": "P1",
+          "start": 10,
+          "end": 17
+        },
+        {
+          "pid": "P3",
+          "start": 17,
+          "end": 26
+        }
+      ],
+      "per_process": {
+        "P1": {
+          "start": 0,
+          "completion": 17,
+          "turnaround": 17,
+          "waiting": 9,
+          "response": 0,
+          "dispatches": 2
+        },
+        "P2": {
+          "start": 1,
+          "completion": 5,
+          "turnaround": 4,
+          "waiting": 0,
+          "response": 0,
+          "dispatches": 1
+        },
+        "P3": {
+          "start": 17,
+          "completion": 26,
+          "turnaround": 24,
+          "waiting": 15,
+          "response": 15,
+          "dispatches": 1
+        },
+        "P4": {
+          "start": 5,
+          "completion": 10,
+          "turnaround": 7,
+          "waiting": 2,
+          "response": 2,
+          "dispatches": 1
+        }
+      },
+      "averages": {
+        "turnaround": 13.0,
+        "waiting": 6.5,
+        "response": 4.25
+      },
+      "makespan": 26,
+      "cpu_utilization_pct": 100.0,
+      "idle": 0,
+      "context_switch_time": 0
+    }
+  }
+}
