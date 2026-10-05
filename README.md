@@ -24,5 +24,3 @@
 10.Input-validation and export functions
 
 11.Automated testing code
-
-# Sprint Backlog
