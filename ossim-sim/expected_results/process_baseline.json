@@ -3,7 +3,7 @@
   "time_unit": "ms (1 ms = 10 ticks)",
   "context_switch_ms": 0,
   "tie_breakers": "earlier arrival, then input order; RR requeues the expired process after same-time arrivals; preemption only when strictly better; lower priority number = higher priority",
-  "status": "TO BE HAND-VERIFIED by Copernick before submission",
+  "status": "TO BE HAND-VERIFIED by Copernic before submission",
   "algorithms": {
     "fcfs": {
       "gantt": [
