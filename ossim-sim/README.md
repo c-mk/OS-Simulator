@@ -9,7 +9,7 @@ touches real user files, or sends network traffic.
 | Member | Role |
 | --- | --- |
 | Rasheed Rahman | Project lead / integrator, parallel computing |
-| Copernick | Process & memory engineer |
+| Copernic | Process & memory engineer |
 | Liberty | File & security engineer |
 | Arian | Device & network engineer |
 | Christian | Dashboard / visualization engineer |
