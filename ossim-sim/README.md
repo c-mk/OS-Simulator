@@ -1,7 +1,9 @@
 # OS Simulator — CSC301 Team Project
 
 Deterministic discrete-event operating-system simulator with process, memory, file, security, device and network
-managers, a parallel-computing component, and a local web dashboard. **Simulation only:** it never runs host commands,
+managers, a parallel-computing component, and a local web dashboard. 
+
+**Simulation only:** it never runs host commands,
 touches real user files, or sends network traffic.
 
 **Status:** Milestone 1 (architecture + interactive prototype), tag `m1`.
