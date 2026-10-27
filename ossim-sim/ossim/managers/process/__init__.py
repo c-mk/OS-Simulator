@@ -5,6 +5,7 @@
 # Minimum Manager Interface
 
 # oct 27 
+
 '''
 1. configure(config) - validate and apply manager specific configuration
 2. load(input) - import a workload or scneario asset without mutating unrelated managers.
