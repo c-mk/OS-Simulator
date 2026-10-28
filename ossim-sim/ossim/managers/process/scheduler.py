@@ -44,7 +44,7 @@ class PCB:
 
 
 def ticks_to_ms(ticks: int) -> int | float:
-    
+
     if ticks % TICKS_PER_MS == 0:
         return ticks // TICKS_PER_MS
     return ticks / TICKS_PER_MS
@@ -198,7 +198,7 @@ def schedule(
     def hit_event_limit() -> bool:
         return max_events is not None and len(events) >= max_events
 
-    
+
     if arrival_order:
         t = arrival_order[0].arrival
 
@@ -218,7 +218,7 @@ def schedule(
             close_gantt()
             break
 
-       
+
         if switching_until is not None:
             if t < switching_until:
                 nxt = _next_time(
@@ -237,7 +237,7 @@ def schedule(
             close_gantt()
             switching_until = None
 
-        
+
         if running is not None and pcbs[running].remaining == 0:
             p = pcbs[running]
             close_gantt()
@@ -250,7 +250,7 @@ def schedule(
             if hit_event_limit():
                 break
 
-        
+
         if (
             policy == "rr"
             and running is not None
@@ -284,7 +284,7 @@ def schedule(
                 if hit_event_limit():
                     break
 
-        
+
         if running is None and ready:
             pid = pick_ready(ready, pcbs, policy, aging, aging_interval_ticks)
             if pid is None:
