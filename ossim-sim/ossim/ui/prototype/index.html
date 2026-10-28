@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OS Simulator Dashboard — Milestone 1 Prototype</title>
+<title>OS Simulator Dashboard — Milestone 2 Process Demo</title>
 <style>
 :root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2330;--muted:#5d6676;--line:#d9dde4;--acc:#2f6fdb;--ok:#1f8a4c;--warn:#b26a00;--bad:#c23b3b;
 --p1:#2f6fdb;--p2:#e0702b;--p3:#1d9e74;--p4:#b8860b;--cs:#555;--idle:#bbb}
@@ -28,6 +28,13 @@ select,input[type=number],input[type=text]{font:inherit;padding:5px 8px;border:1
 .btn.ghost{background:#fff;color:var(--acc)}
 .note{background:#fff8e6;border:1px solid #f0d58a;border-radius:8px;padding:8px 12px;margin:10px 0;font-size:13px}
 .gantt{position:relative;height:46px;border:1px solid var(--line);background:#fff;border-radius:6px;margin:6px 0 22px}
+.gantt{margin-bottom:34px}.tlbox{margin:6px 0 4px}.lane{display:flex;align-items:center;gap:8px;margin:3px 0}.lname{width:34px;font-weight:600;font-size:12px}
+.ltrack{position:relative;flex:1;height:22px;background:#fff;border:1px solid var(--line);border-radius:4px}
+.tl{position:absolute;top:0;bottom:0;font-size:11px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.tl.running{background:#1d2330;color:#fff}.tl.ready{background:repeating-linear-gradient(45deg,#fff,#fff 4px,#d9dde4 4px,#d9dde4 8px);color:#222;border-top:1px solid #888;border-bottom:1px solid #888}
+.sw{display:inline-block;width:14px;height:10px;margin-right:5px;border:1px solid #888}.sw.run{background:#1d2330}.sw.wait{background:repeating-linear-gradient(45deg,#fff,#fff 3px,#d9dde4 3px,#d9dde4 6px)}
+details{margin:8px 0}summary{cursor:pointer}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin:2px 0 14px}.lg i{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 .seg{position:absolute;top:0;bottom:0;color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;border-right:1px solid #fff}
 .tick{position:absolute;top:48px;font-size:11px;color:var(--muted);transform:translateX(-50%)}
 .frames td.f{background:#ffecec}.frames td.h{background:#e9f7ef}
@@ -46,7 +53,7 @@ select,input[type=number],input[type=text]{font:inherit;padding:5px 8px;border:1
   <button data-act="Run">▶ Run</button> <button data-act="Pause">⏸ Pause</button> <button data-act="Step">⏭ Step</button> <button data-act="Reset">↺ Reset</button>
   <label class="sr" for="speed">Speed</label><select id="speed"><option>1×</option><option>2×</option><option>5×</option><option>Max</option></select>
   <label class="sr" for="seed">Seed</label><input id="seed" type="number" value="42" style="width:80px;background:#22304a;color:#fff;border-color:#3b4a66" aria-label="Seed">
-  <select aria-label="Stop condition"><option>Stop: all done</option><option>Stop: t = 100 ms</option><option>Stop: 1000 events</option></select>
+  <label class="sr" for="stop">Stop condition</label><select id="stop"><option value="">Stop: all done</option><option value="t10">Stop: t = 10 ms</option><option value="e20">Stop: after 20 events</option></select>
   <button data-act="Batch">Batch…</button>
  </div>
  <div class="state">Scenario: <b>baseline-01</b> · t = <b id="clock">0.0</b> ms · State: <b id="runstate">Ready</b></div>
@@ -73,8 +80,182 @@ const COL = {P1:"var(--p1)",P2:"var(--p2)",P3:"var(--p3)",P4:"var(--p4)"};
 const ALGS = {fcfs:"FCFS",sjf:"SJF (non-preemptive)",srtf:"SRTF",rr_q4:"Round-Robin (q = 4 ms)",priority_np:"Priority (non-preemptive)",priority_p_no_aging:"Priority (preemptive, aging off)"};
 const $ = s => document.querySelector(s);
 function toast(t){const e=$("#toast");e.textContent=t;e.classList.add("show");clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("show"),2600)}
-document.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>{ $("#runstate").textContent={Run:"Running",Pause:"Paused",Step:"Stepped",Reset:"Ready",Batch:"Batch (prototype)"}[b.dataset.act];
-  if(b.dataset.act==="Reset") $("#clock").textContent="0.0"; toast(b.dataset.act+": control layout only. The controller is wired up in Milestone 2.");});
+
+const POLS = {fcfs:"FCFS",sjf:"SJF (non-preemptive)",srtf:"SRTF",rr:"Round-Robin",priority_np:"Priority (non-preemptive)",priority_p:"Priority (preemptive)"};
+const DEFAULT_CSV = "pid,arrival,burst,priority\nP1,0,8,3\nP2,1,4,1\nP3,2,9,4\nP4,3,5,2";
+const REFKEY = {fcfs:"fcfs",sjf:"sjf",srtf:"srtf",rr:"rr_q4",priority_np:"priority_np",priority_p:"priority_p_no_aging"};
+const TPM = 10; // ticks per ms (ADR-0001)
+let ENGINE = null, RUN = null, CUR = 0, TIMER = null, WLTEXT = DEFAULT_CSV;
+const PCOL = ["var(--p1)","var(--p2)","var(--p3)","var(--p4)","#7b4bb7","#a3365a","#2a7f9e","#6a7a1e"];
+function pcolor(pid, order){ if(pid==="IDLE") return "var(--idle)"; const i=order.indexOf(pid); return i<0?"var(--cs)":PCOL[i%PCOL.length]; }
+
+async function engineStatus(){
+  try{ ENGINE = await (await fetch("/api/status")).json(); }
+  catch(e){ ENGINE = {engine:false, detail:"Not served by python -m ossim.ui, so there is no engine to call"}; }
+}
+function banner(){
+  const el=$("#engbanner"); if(!el) return;
+  if(ENGINE && ENGINE.engine){ el.className="note"; el.style.background="#e9f7ef"; el.style.borderColor="#9ad3b3";
+    el.innerHTML="<b>Engine connected.</b> Results below are simulator output."; }
+  else { el.className="note"; el.style.background="#fff0f0"; el.style.borderColor="#e3a1a1";
+    el.innerHTML="<b>Engine not connected.</b> "+(ENGINE?ENGINE.detail:"checking...")+". Run shows the hand-calculated reference values for the baseline workload only. They are not simulator output, and custom workloads cannot run."; }
+}
+const fx=(v,d=2)=>v==null?"-":(+v).toFixed(d);
+function ptable2(res){
+  let h=`<table><caption class="sr">Per-process metrics</caption><tr><th>PID</th><th>Start</th><th>Completion</th><th>Turnaround</th><th>Waiting</th><th>Response</th><th>Dispatches</th></tr>`;
+  for(const [p,m] of Object.entries(res.per_process)) h+=`<tr><td>${p}</td><td>${m.start??"-"}</td><td>${m.completion??"-"}</td><td>${m.turnaround??"-"}</td><td>${m.waiting??"-"}</td><td>${m.response??"-"}</td><td>${m.dispatches}</td></tr>`;
+  const a=res.averages; return h+`<tr><th>Average</th><td></td><td></td><th>${fx(a.turnaround)}</th><th>${fx(a.waiting)}</th><th>${fx(a.response)}</th><td></td></tr></table>`;
+}
+function ganttText(segs){
+  return `<details><summary>Text version of the Gantt chart</summary><table><tr><th>Segment</th><th>Start (ms)</th><th>End (ms)</th><th>Length (ms)</th></tr>`+
+    segs.map(s=>`<tr><td>${s.pid==="CS"?"Context switch":s.pid==="IDLE"?"CPU idle":s.pid}</td><td>${s.start}</td><td>${s.end}</td><td>${+(s.end-s.start).toFixed(1)}</td></tr>`).join("")+`</table></details>`;
+}
+function setClock(ms){ $("#clock").textContent = (+ms).toFixed(1); }
+function setState(s){ $("#runstate").textContent = s; }
+
+// Client-side workload validation: same rules and wording style as ossim/io/loaders.py
+function parseWorkload(text){
+  const errs=[], rows=[], seen=new Set();
+  const lines=text.replace(/\r/g,"").split("\n").filter(l=>l.trim()!=="");
+  if(!lines.length) return {rows, errs:["Workload is empty"]};
+  if(lines[0].replace(/\s/g,"")!=="pid,arrival,burst,priority") return {rows, errs:["Line 1: header must be pid,arrival,burst,priority"]};
+  lines.slice(1).forEach((ln,i)=>{ const n=i+2, c=ln.split(",").map(x=>x.trim());
+    if(c.length!==4){errs.push(`Line ${n}: wrong number of fields (need 4, found ${c.length})`);return}
+    if(!/^[A-Za-z0-9_-]{1,31}$/.test(c[0])){errs.push(`Line ${n}: invalid pid "${c[0]}"`);return}
+    if(seen.has(c[0])){errs.push(`Line ${n}: duplicate pid ${c[0]}`);return}
+    if(![c[1],c[2],c[3]].every(v=>/^-?\d+$/.test(v))){errs.push(`Line ${n}: arrival, burst and priority must be integers`);return}
+    const a=+c[1],b=+c[2],p=+c[3];
+    if(a<0||b<=0||p<0){errs.push(`Line ${n}: arrival >= 0, burst > 0, priority >= 0 required`);return}
+    seen.add(c[0]); rows.push({pid:c[0],arrival:a,burst:b,priority:p}); });
+  if(!errs.length && !rows.length) errs.push("No processes");
+  return {rows, errs};
+}
+function cfg(){
+  const pol=$("#alg").value;
+  return { policy: pol.startsWith("priority")?"priority":pol, preemptive: pol==="priority_p"||pol==="srtf",
+    q:+$("#q").value, cs:+$("#cs").value, aging:+$("#age").value, seed:+$("#seed").value, csv:$("#wl").value, stop:({t10:{max_time:100},e20:{max_events:20}})[$("#stop").value]||null };
+}
+function cfgErrors(c){
+  const e=[]; if(!(c.q>=1)) e.push("Quantum must be at least 1 ms"); if(c.cs<0) e.push("Context-switch cost cannot be negative");
+  if(c.aging<0) e.push("Aging interval cannot be negative"); if(!Number.isInteger(c.seed)) e.push("Seed must be an integer");
+  if(Math.round(c.cs*10)!==c.cs*10 && Math.abs(c.cs*10-Math.round(c.cs*10))>1e-9) e.push("Context switch must be a multiple of 0.1 ms");
+  return e;
+}
+function showMsgs(errs){ const m=$("#wlmsg"); if(!m) return;
+  m.innerHTML = errs.length ? errs.map(e=>`<div class="err">Error: ${e}</div>`).join("") : `<div style="color:var(--ok)">Valid. Nothing was changed.</div>`; }
+
+function normalize(s){ // engine ticks -> ms
+  const t=v=>v==null?null:v/TPM, pp={};
+  for(const [p,m] of Object.entries(s.per_process||{})) pp[p]={start:t(m.start),completion:t(m.completion),turnaround:t(m.turnaround),waiting:t(m.waiting),response:t(m.response),dispatches:m.dispatches};
+  const a=s.averages||{};
+  return { gantt:(s.gantt||[]).map(g=>({pid:g.pid,start:t(g.start),end:t(g.end)})), per_process:pp,
+    averages:{turnaround:t(a.turnaround),waiting:t(a.waiting),response:t(a.response)}, makespan:t(s.makespan), finished:s.finished,
+    cpu_utilization_pct:s.cpu_utilization_pct, idle:t(s.idle||0), context_switch_time:t(s.context_switch_time||0) };
+}
+async function loadRun(){
+  const c=cfg(), pw=parseWorkload(c.csv), ce=cfgErrors(c);
+  if(pw.errs.length||ce.length){ showMsgs(pw.errs.concat(ce)); setState("Input error"); return false; }
+  showMsgs([]);
+  if(ENGINE && ENGINE.engine){
+    const r=await fetch("/api/process/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(c)});
+    const j=await r.json();
+    if(!r.ok){ showMsgs(j.errors||["Engine error"]); setState("Input error"); return false; }
+    RUN={source:"engine", res:normalize(j.snapshot), events:j.events, cfg:c, order:pw.rows.map(r=>r.pid)}; return true;
+  }
+  const same = c.csv.replace(/\s+$/,"")===DEFAULT_CSV && c.cs===0 && c.aging===0 && (c.policy!=="rr"||c.q===4);
+  if(!same){ showMsgs(["Engine not connected: only the baseline workload with default settings can be shown from hand-calculated reference values."]); setState("No engine"); return false; }
+  const k=REFKEY[$("#alg").value]; if(!k){ return false; }
+  RUN={source:"reference", res:EXP.process.algorithms[k], events:[], cfg:c, order:["P1","P2","P3","P4"]}; return true;
+}
+function visibleUntil(){ // time (ms) reached by the replay cursor
+  if(!RUN) return 0;
+  if(RUN.source==="reference" || !RUN.events.length) return RUN.res.makespan;
+  if(CUR<=0) return 0;
+  const i=Math.min(CUR,RUN.events.length)-1; return RUN.events[i].time/TPM;
+}
+function drawRun(){
+  const out=$("#pout"); if(!out||!RUN) return;
+  const r=RUN.res, T=visibleUntil(), done = RUN.source==="reference" || CUR>=RUN.events.length;
+  const segs=r.gantt.filter(s=>s.start<T || done).map(s=>({pid:s.pid,start:s.start,end:done?s.end:Math.min(s.end,T)}));
+  const lab = RUN.source==="engine" ? "Simulator output" : "Hand-calculated reference (not simulator output)";
+  const order=RUN.order, legend = order.map(p=>`<span class="lg"><i style="background:${pcolor(p,order)}"></i>${p}</span>`).join("")+`<span class="lg"><i style="background:var(--cs)"></i>CS = context switch</span><span class="lg"><i style="background:var(--idle)"></i>IDLE = CPU idle</span>`;
+  let h=`<h3 style="margin-top:16px">${POLS[$("#alg").value]}: CPU Gantt chart (x axis: time in ms)</h3><p class="sub">${lab}</p>`+ganttN(segs, r.makespan, order)+`<div class="legend">${legend}</div>`;
+  h+=ganttText(segs);
+  if(done && r.finished===false){ h+=`<div class="note"><b>Stopped early</b> by the stop condition; the last event was at ${r.makespan} ms. Metrics are shown only for processes that finished; the segment in progress is not drawn.</div>`+ptable2(r); }
+  else if(done){ h+=ptable2(r)+`<p class="sub">Makespan ${r.makespan} ms · CPU utilization ${(+r.cpu_utilization_pct).toFixed(1)}% · idle ${r.idle} ms · context-switch time ${r.context_switch_time} ms</p>`; }
+  else h+=`<p class="sub">Run in progress: metrics appear when the run finishes or stops.</p>`;
+  if(RUN.events.length) h+=timeline(RUN.events.slice(0,CUR), T, Math.max(r.makespan,1), order);
+  if(RUN.events.length){
+    h+=`<h3>Event log (${Math.min(CUR,RUN.events.length)} of ${RUN.events.length})</h3><div style="max-height:260px;overflow:auto"><table><tr><th>seq</th><th>t (ms)</th><th>Event</th><th>Entity</th><th>State change</th><th>Outcome</th><th>Message</th></tr>`+
+    RUN.events.slice(0,CUR).map(e=>`<tr><td>${e.seq}</td><td>${(e.time/TPM).toFixed(1)}</td><td>${e.event_type}</td><td>${e.entity_id}</td><td>${e.prev_state??""} → ${e.new_state??""}</td><td>${e.outcome}</td><td>${e.message??""}</td></tr>`).join("")+`</table></div>`;
+  }
+  out.innerHTML=h;
+}
+function timeline(events, upto, end, order){
+  const lanes={}; order.forEach(p=>lanes[p]=[]);
+  events.forEach(e=>{ if(e.manager!=="process"||!lanes[e.entity_id]||e.prev_state===e.new_state||!e.prev_state) return; lanes[e.entity_id].push([e.time/TPM,e.new_state]); });
+  const fin={ready:"waiting",running:"running"}; let rows="", tbl="";
+  for(const p of order){ const L=lanes[p]; let h=""; 
+    L.forEach(([t,st],i)=>{ if(st==="terminated"||t>=upto) return; const nt=i+1<L.length?Math.min(L[i+1][0],upto):upto; const w=(nt-t)/end*100;
+      tbl+=`<tr><td>${p}</td><td>${fin[st]||st}</td><td>${t}</td><td>${nt}</td></tr>`;
+      h+=`<div class="tl ${st}" style="left:${t/end*100}%;width:${w}%" title="${p} ${fin[st]||st} ${t}-${nt} ms">${w>6?(st==="running"?"RUN":"wait"):""}</div>`; });
+    rows+=`<div class="lane"><span class="lname">${p}</span><div class="ltrack" role="img" aria-label="${p} state timeline">${h}</div></div>`; }
+  return `<h3>Process state timeline (x axis: time in ms)</h3><div class="tlbox">${rows}</div>
+   <div class="legend"><span class="lg"><i class="sw run"></i>RUN = running</span><span class="lg"><i class="sw wait"></i>wait = ready, waiting for the CPU</span></div>
+   <details><summary>Text version of the timeline</summary><table><tr><th>PID</th><th>State</th><th>From (ms)</th><th>To (ms)</th></tr>${tbl}</table></details>`;
+}
+function ganttN(segs,total,order){
+  let h=`<div class="gantt" role="img" aria-label="CPU Gantt chart, ${segs.length} segments">`; const ticks=new Set([0]);
+  segs.forEach(s=>{ticks.add(s.start);ticks.add(s.end);
+    h+=`<div class="seg" style="left:${s.start/total*100}%;width:${(s.end-s.start)/total*100}%;background:${pcolor(s.pid,order)};${s.pid==="IDLE"?"color:#222;":""}" title="${s.pid} ${s.start}-${s.end} ms">${(s.end-s.start)/total>=0.03?s.pid:""}</div>`});
+  const all=[...ticks].sort((a,b)=>a-b); all.forEach((t,i)=>{ if(i===0||t-all[i-1]>=total*0.025) h+=`<span class="tick" style="left:${t/total*100}%">${t}</span>`});
+  return h+`</div>`;
+}
+function endState(){ return RUN&&RUN.res.finished===false?"Stopped":"Finished"; }
+function stopTimer(){ if(TIMER){clearInterval(TIMER);TIMER=null} }
+function sync(){ setClock(visibleUntil()); drawRun(); }
+async function ctl(act){
+  if(!$("#alg")){ show("process"); await engineStatus(); banner(); }
+  if(act==="Reset"){ stopTimer(); RUN=null; CUR=0; setClock(0); setState("Ready"); const o=$("#pout"); if(o) o.innerHTML=""; showMsgs([]); toast("Reset: run cleared, inputs kept"); return; }
+  if(act==="Batch"){ toast("Batch runs are planned for Milestone 3. Use the Comparison center for several policies."); return; }
+  if(act==="Pause"){ if(TIMER){stopTimer(); setState("Paused");} return; }
+  if(!RUN){ CUR=0; if(!(await loadRun())) return; }
+  const n=RUN.events.length;
+  if(act==="Step"){ stopTimer(); if(CUR<n) CUR++; sync(); setState(CUR>=n?endState():"Paused"); return; }
+  if(act==="Run"){ stopTimer(); const sp=$("#speed").value; if(CUR>=n && n>0) CUR=0;
+    if(sp==="Max"||n===0){ CUR=n; sync(); setState(endState()); return; }
+    const delay={"1×":500,"2×":250,"5×":100}[sp]||250; setState("Running");
+    TIMER=setInterval(()=>{ if(CUR<n){CUR++;sync()} if(CUR>=n){stopTimer();setState(endState())} },delay); sync(); }
+}
+function wireProcess(){
+  $("#wl").value=WLTEXT; $("#wl").oninput=()=>{WLTEXT=$("#wl").value};
+  $("#wlcheck").onclick=()=>showMsgs(parseWorkload($("#wl").value).errs);
+  $("#wlreset").onclick=()=>{WLTEXT=DEFAULT_CSV;$("#wl").value=DEFAULT_CSV;showMsgs([])};
+  $("#alg").onchange=()=>{ if(RUN){ctl("Reset")} };
+  banner(); engineStatus().then(banner); if(RUN) sync();
+}
+document.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>ctl(b.dataset.act));
+
+const BASE_CASES=[["T-PR-02 FCFS","fcfs",{policy:"fcfs"}],["T-PR-03 SJF","sjf",{policy:"sjf"}],["T-PR-04 SRTF","srtf",{policy:"srtf",preemptive:true}],
+ ["T-PR-05 Round-Robin q = 4","rr_q4",{policy:"rr",q:4}],["T-PR-06 Priority, non-preemptive","priority_np",{policy:"priority"}],["T-PR-06 Priority, preemptive, aging off","priority_p_no_aging",{policy:"priority",preemptive:true}]];
+const BAD_CASES=[["T-INV-01 wrong header","pid,arrival,burst\nP1,0,5","header must be"],["T-INV-02 duplicate pid","pid,arrival,burst,priority\nP1,0,5,1\nP1,1,5,1","duplicate pid"],["T-INV-03 zero burst","pid,arrival,burst,priority\nP1,0,0,1","burst > 0"]];
+const gtxt=g=>g.map(s=>`${s.pid} ${s.start}-${s.end}`).join(", ");
+async function post(path,body){ const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); return {ok:r.ok,status:r.status,j:await r.json()}; }
+async function runChecks(){
+  const out=$("#tcout"), prog=$("#tcprog"); await engineStatus();
+  if(!(ENGINE&&ENGINE.engine)){ out.innerHTML=`<div class="err">Engine not connected: start the dashboard with python -m ossim.ui. Nothing was run.</div>`; return; }
+  const rows=[]; let pass=0;
+  for(const [name,key,c] of BASE_CASES){ prog.textContent="Running "+name+"..."; const exp=EXP.process.algorithms[key];
+    const r=await post("/api/process/run",{csv:DEFAULT_CSV,q:4,cs:0,aging:0,seed:0,...c}); const n=normalize(r.j.snapshot);
+    const ge=gtxt(exp.gantt), ga=gtxt(n.gantt); const ae=`${exp.averages.turnaround}/${exp.averages.waiting}/${exp.averages.response}`, aa=`${n.averages.turnaround}/${n.averages.waiting}/${n.averages.response}`;
+    const ok=ge===ga&&ae===aa&&n.makespan===exp.makespan; if(ok) pass++;
+    rows.push([name,"Unit: process",ok,`Gantt ${ge}; avg TAT/wait/resp ${ae}; makespan ${exp.makespan}`,`Gantt ${ga}; avg ${aa}; makespan ${n.makespan}`,ok?"matches":"differs from the hand-calculated values"]); }
+  for(const [name,csv,frag] of BAD_CASES){ prog.textContent="Running "+name+"..."; const r=await post("/api/process/run",{csv}); const msg=(r.j.errors||[]).join(" | ");
+    const ok=r.status===422&&msg.includes(frag); if(ok) pass++; rows.push([name,"Invalid input",ok,`rejected (422) with a message containing "${frag}"`,`${r.status}: ${msg||"accepted"}`,ok?"rejected, nothing changed":"not rejected as expected"]); }
+  prog.textContent=""; const bad=rows.length-pass;
+  out.innerHTML=`<p><b>${pass} of ${rows.length} checks passed</b>${bad?` · <span class="err">${bad} failed</span>`:""}</p><table><tr><th>Test</th><th>Suite</th><th>Status</th><th>Expected</th><th>Actual</th><th>Diagnostics</th></tr>`+
+    rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]?'<span class="badge b-ok">PASS</span>':'<span class="badge b-warn">FAIL</span>'}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td></tr>`).join("")+`</table>`;
+}
 const protoNote = what => `<div class="note"><b>Prototype:</b> ${what}</div>`;
 function gantt(segs, total){
   let h=`<div class="gantt" role="img" aria-label="CPU Gantt chart">`;
@@ -93,16 +274,24 @@ const placeholder = (title, owner, ms, panels) => `<h2>${title}</h2><p class="su
 const PAGES = {
 overview: () => `<h2>Overview</h2><p class="sub">Health of each manager, current run and warnings</p>
  <div class="grid">${[["Process","Copernic","M2"],["Memory","Copernic","M3"],["File","Liberty","M3"],["Security","Liberty","M4"],["Device","Arian","M4"],["Network","Arian","M4"],["Parallel","Rasheed","M4"]].map(m=>
- `<div class="card"><h3>${m[0]} manager</h3><span class="badge b-todo">○ Not built</span><p class="sub" style="margin:6px 0 0">Owner ${m[1]} · due ${m[2]}</p></div>`).join("")}</div>
+ `<div class="card"><h3>${m[0]} manager</h3><span class="badge b-todo" ${m[0]==="Process"?'id="ov-proc"':""}>${m[0]==="Process"?"Checking":"Not built"}</span><p class="sub" style="margin:6px 0 0">Owner ${m[1]} · due ${m[2]}</p></div>`).join("")}</div>
  <div class="row" style="margin-top:14px"><div class="card" style="flex:1"><h3>Run summary</h3>Scenario <b>baseline-01</b> · seed 42 · 0 events · 0 warnings</div>
- <div class="card" style="flex:1"><h3>Warnings</h3><span class="badge b-warn">! 1 warning</span> Prototype build: managers are not connected yet.</div></div>`,
+ <div class="card" style="flex:1"><h3>Warnings</h3><span class="badge b-warn">! 1 warning</span> Only the Process page is wired to an engine. Other managers are not built yet.</div></div>`,
 process: () => `<h2>Process manager</h2><p class="sub">Owner: Copernic · CPU scheduling (spec 4.1)</p>
- ${protoNote("Run shows the hand-calculated values from <code>expected_results/process_baseline.json</code>, not live simulator output. The simulator replaces them in Milestone 2.")}
- <div class="row"><div><label for="alg">Policy</label><select id="alg">${Object.entries(ALGS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select></div>
- <div><label for="q">Quantum q (ms)</label><input id="q" type="number" value="4" min="1" style="width:80px"></div>
- <div><label for="cs">Context switch (ms)</label><input id="cs" type="number" value="0" step="0.1" min="0" style="width:80px"></div>
- <div><label>&nbsp;</label><button class="btn" id="prun">Run</button> <button class="btn ghost" onclick="toast('Process unit tests run from the Testing center in M2')">Test</button></div></div>
- <h3 style="margin-top:16px">Input workload</h3><table><tr><th>PID</th><th>Arrival (ms)</th><th>Burst (ms)</th><th>Priority</th></tr>${PROC.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</table>
+ <div id="engbanner" class="note" role="status"></div>
+ <div class="row">
+  <div><label for="alg">Policy</label><select id="alg">${Object.entries(POLS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select></div>
+  <div><label for="q">Quantum q (ms)</label><input id="q" type="number" value="4" min="1" style="width:80px"></div>
+  <div><label for="cs">Context switch (ms)</label><input id="cs" type="number" value="0" step="0.1" min="0" style="width:80px"></div>
+  <div><label for="age">Aging every (ms, 0 = off)</label><input id="age" type="number" value="0" min="0" style="width:90px"></div>
+ </div>
+ <div class="row" style="margin-top:10px">
+  <div style="flex:1;min-width:280px"><label for="wl">Workload (CSV: pid,arrival,burst,priority; times in ms, lower priority number = higher priority)</label>
+   <textarea id="wl" rows="6" style="width:100%;font-family:ui-monospace,Menlo,monospace">${DEFAULT_CSV}</textarea>
+   <div class="row" style="margin-top:6px"><button class="btn ghost" id="wlcheck">Validate workload</button><button class="btn ghost" id="wlreset">Restore baseline</button></div>
+   <div id="wlmsg" role="alert"></div></div>
+  <div class="card" style="max-width:340px"><h3>How to run</h3><p class="sub" style="margin:0">Use the toolbar at the top. <b>Run</b> plays the simulation event by event at the chosen speed, <b>Pause</b> holds it, <b>Step</b> advances one event, <b>Reset</b> clears the run. The same seed and inputs give the same result.</p></div>
+ </div>
  <div id="pout"></div>`,
 memory: () => `<h2>Memory manager</h2><p class="sub">Owner: Copernic · Paging, FIFO vs LRU (spec 4.2)</p>
  ${protoNote("values come from <code>expected_results/memory_baseline.json</code> (page size 4096 B, 3 frames).")}
@@ -119,23 +308,20 @@ parallel: () => placeholder("Parallel computing","Rasheed (backup Copernic)","Mi
 scenario: () => `<h2>Scenario builder</h2><p class="sub">Create and edit every input type; validation runs before saving</p>
  <div class="tabs" role="tablist">${["Processes","Address trace","File script","Users & policies","Device requests","Packets & links","Failure events"].map((t,i)=>`<button role="tab" aria-selected="${i===0}" data-tab="${i}">${t}</button>`).join("")}</div>
  <div class="card" style="border-radius:0 8px 8px 8px"><div id="tabbody"></div></div>`,
-testing: () => `<h2>Testing center</h2><p class="sub">Run unit suites, integration scenarios and boundary/failure cases</p>
- ${protoNote("results layout only. Suites run with pytest today; dashboard hook-up is Milestone 2. Nothing below is a real result.")}
- <div class="row" style="margin-bottom:10px"><select aria-label="Suite"><option>All suites</option><option>Unit: process</option><option>Unit: memory</option><option>Unit: file</option><option>Integration</option><option>Invalid input</option><option>Stress</option></select> <button class="btn" onclick="toast('Run tests: wired in Milestone 2')">Run selected</button></div>
- <table><tr><th>Test</th><th>Suite</th><th>Status</th><th>Expected</th><th>Actual</th><th>Diagnostics</th></tr>
- ${[["T-BASE-01 process baseline","Unit"],["T-BASE-02 memory baseline","Unit"],["T-BASE-03 file baseline","Unit"],["T-API-01 manager interface","Contract"],["T-EV-01 event schema","Contract"],["T-INV-01 malformed CSV","Invalid input"],["T-INT-03 block/unblock","Integration"]].map(t=>`<tr><td>${t[0]}</td><td>${t[1]}</td><td><span class="badge b-todo">○ not run</span></td><td>—</td><td>—</td><td>—</td></tr>`).join("")}</table>`,
+testing: () => `<h2>Testing center</h2><p class="sub">Runs the engine on the baseline workload and on bad inputs, then compares with the expected values</p>
+ <div class="note">Expected values are the hand-calculated results in <code>expected_results/process_baseline.json</code>. The full automated suite (<code>pytest -q</code>) runs from the terminal.</div>
+ <div class="row" style="margin-bottom:10px"><button class="btn" id="tcrun">Run process checks</button><span id="tcprog" role="status" class="sub" style="margin:6px 0 0 8px"></span></div>
+ <div id="tcout"></div>`,
 compare: () => { const rows=Object.entries(ALGS).map(([k,v])=>[v,EXP.process.algorithms[k].averages]); const mx=Math.max(...rows.map(r=>r[1].waiting));
  return `<h2>Comparison center</h2><p class="sub">Same input, several policies, side by side</p>${protoNote("expected values for the baseline workload, cs = 0.")}
  <table><tr><th>Policy</th><th>Avg waiting (ms)</th><th>Avg turnaround (ms)</th><th>Avg response (ms)</th><th style="width:35%">Avg waiting (bar)</th></tr>
  ${rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1].waiting.toFixed(2)}</td><td>${r[1].turnaround.toFixed(2)}</td><td>${r[1].response.toFixed(2)}</td><td><div class="bar" style="width:${r[1].waiting/mx*100}%" aria-hidden="true"></div></td></tr>`).join("")}</table>`},
-events: () => `<h2>Event explorer</h2><p class="sub">Filter by time, manager, entity, event, outcome, severity, correlation ID</p>
- ${protoNote("sample rows show the event schema; they are not simulator output.")}
- <div class="row" style="margin-bottom:10px"><input type="text" placeholder="Search…" aria-label="Search"><select aria-label="Manager"><option>All managers</option><option>process</option><option>memory</option><option>file</option><option>security</option><option>device</option><option>network</option><option>parallel</option></select>
- <select aria-label="Outcome"><option>Any outcome</option><option>ok</option><option>denied</option><option>failed</option><option>error</option></select><select aria-label="Severity"><option>Any severity</option><option>info</option><option>warning</option><option>critical</option></select><input type="text" placeholder="Correlation ID" aria-label="Correlation ID"></div>
- <table><tr><th>seq</th><th>t (ms)</th><th>Manager</th><th>Event</th><th>Entity</th><th>Prev → new</th><th>Outcome</th><th>Severity</th><th>Correlation</th><th>Message</th></tr>
- <tr><td>1</td><td>0.0</td><td>process</td><td>ARRIVE</td><td>P1</td><td>new → ready</td><td>ok</td><td>info</td><td>baseline-01</td><td>sample</td></tr>
- <tr><td>2</td><td>0.0</td><td>process</td><td>DISPATCH</td><td>P1</td><td>ready → running</td><td>ok</td><td>info</td><td>baseline-01</td><td>sample</td></tr>
- <tr><td>3</td><td>1.0</td><td>security</td><td>AUTHORIZE</td><td>bob:/docs/notes.txt</td><td>— → —</td><td>denied</td><td>warning</td><td>P2-fs-1</td><td>sample: write denied</td></tr></table>`,
+events: () => { const E=RUN?RUN.events:[]; return `<h2>Event explorer</h2><p class="sub">Events from the last Process run</p>
+ ${E.length?"":'<div class="note">No events yet. Run a simulation from the Process page (engine required).</div>'}
+ <div class="row" style="margin-bottom:10px"><div><label for="evq">Search</label><input id="evq" type="text" placeholder="entity, event, message"></div>
+ <div><label for="evt">Event type</label><select id="evt"><option value="">All</option>${[...new Set(E.map(e=>e.event_type))].map(t=>`<option>${t}</option>`).join("")}</select></div></div>
+ <div style="max-height:480px;overflow:auto"><table id="evtab"><tr><th>seq</th><th>t (ms)</th><th>Event</th><th>Entity</th><th>State change</th><th>Outcome</th><th>Severity</th><th>Correlation</th><th>Message</th></tr>
+ ${E.map(e=>`<tr data-t="${e.event_type}" data-s="${(e.entity_id+" "+e.event_type+" "+e.message).toLowerCase()}"><td>${e.seq}</td><td>${(e.time/10).toFixed(1)}</td><td>${e.event_type}</td><td>${e.entity_id}</td><td>${e.prev_state??""} to ${e.new_state??""}</td><td>${e.outcome}</td><td>${e.severity}</td><td>${e.correlation_id}</td><td>${e.message}</td></tr>`).join("")}</table></div>`},
 export: () => `<h2>Export</h2><p class="sub">Save configuration, event log, per-manager CSV, charts and summary (no host data)</p>
  <div class="grid">${["Configuration (JSON)","Event log (CSV / JSON)","Process metrics (CSV)","Memory results (CSV)","File log (CSV)","Charts (SVG/PNG)","Summary report (Markdown)"].map(x=>`<div class="card"><h3>${x}</h3><button class="btn ghost" onclick="toast('Export: Milestone 2+')">Export</button></div>`).join("")}</div>`
 };
@@ -151,9 +337,10 @@ const TABS=[
 function show(page){
   document.querySelectorAll("nav button").forEach(b=>{ if(b.dataset.page===page) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current"); });
   $("#main").innerHTML=PAGES[page](); $("#main").focus();
-  if(page==="process"){ $("#prun").onclick=()=>{const k=$("#alg").value,r=EXP.process.algorithms[k];
-     if(+$("#cs").value<0){toast("Context-switch cost cannot be negative");return}
-     $("#pout").innerHTML=`<h3 style="margin-top:16px">${ALGS[k]}: CPU Gantt chart (ms)</h3>`+gantt(r.gantt,r.makespan)+ptable(r)+`<p class="sub">Makespan ${r.makespan} ms · CPU utilization ${r.cpu_utilization_pct}% · idle ${r.idle} ms · context-switch time ${r.context_switch_time} ms</p>`; }; $("#prun").click(); }
+  if(page==="process"){ wireProcess(); }
+  if(page==="overview"){ engineStatus().then(()=>{const e=$("#ov-proc"); if(e) e.textContent=ENGINE&&ENGINE.engine?"Engine connected":"Engine not connected";}); }
+  if(page==="events"){ const f=()=>{const q=($("#evq").value||"").toLowerCase(),t=$("#evt").value; document.querySelectorAll("#evtab tr[data-s]").forEach(r=>{r.style.display=(!q||r.dataset.s.includes(q))&&(!t||r.dataset.t===t)?"":"none"})}; $("#evq").oninput=f; $("#evt").onchange=f; }
+  if(page==="testing"){ $("#tcrun").onclick=runChecks; }
   if(page==="memory"){ $("#mrun").onclick=()=>{const m=EXP.memory, r=m[$("#mp").value]; const fr=[];let rows="";
      m.pages.forEach((p,i)=>{ if(r.results[i]==="F"){ if(r.evicted[i]!==null) fr.splice(fr.indexOf(r.evicted[i]),1,p); else fr.push(p);} 
        rows+=`<tr><td>${i+1}</td><td>0x${[0x0040,0x10A0,0x0044,0x20B0,0x3010,0x0048,0x10A4,0x4000,0x0050,0x20B4][i].toString(16).toUpperCase().padStart(4,"0")}</td><td>${p}</td>${[0,1,2].map(j=>`<td>${fr[j]??""}</td>`).join("")}<td class="${r.results[i]==="H"?"h":"f"}">${r.results[i]==="H"?"Hit":"Fault"}</td><td>${r.evicted[i]??""}</td></tr>`;});
