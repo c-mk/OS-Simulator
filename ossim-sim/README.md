@@ -78,7 +78,7 @@ GenAI-drafted material if none was given]. Use: drafted the Milestone 1 report (
 matrix, architecture diagram, data model, event schema, API tables, risk register, sprint backlog), generated this
 repository skeleton (interface stubs, loaders, CI, tests), the dashboard prototype, and candidate expected results for the
 baseline cases. Student modification: [what the team changed, rejected or rewrote]. Verification: [hand calculations of
-the expected results by Copernick and Liberty; pytest/ruff run in the team VM; RTM reviewed against the spec by Derrick].
+the expected results by Copernic and Liberty; pytest/ruff run in the team VM; RTM reviewed against the spec by Derrick].
 Affected files/sections: Milestone 1 report; README.md, CONTRIBUTING.md, docs/adr/*, ossim/core/*, ossim/managers/base.py,
 ossim/io/loaders.py, ossim/ui/*, tests/*, inputs/*, expected_results/*.
 
