@@ -1,335 +1,394 @@
-"""Process manager implementation. Owner: Copernic. Spec 4.1 / Appendix A."""
-
-# imports
+"""ProcessManager: event-driven CPU scheduler. All times inside are integer ticks (1 tick = 0.1 ms)."""
 from __future__ import annotations
 
 import csv
 import io
 import json
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-
 from ossim.core.clock import ms_to_ticks
-from ossim.core.events import Event
-from ossim.io.loaders import InputError, load_processes_csv
+from ossim.core.controller import Controller
+from ossim.core.events import REQUIRED_FIELDS, TICKS_PER_MS, Event
+from ossim.io.loaders import PID_RE, InputError, load_processes_csv
 from ossim.managers.base import Manager
-from ossim.managers.process.scheduler import POLICIES, resolve_policy, result_in_ms, schedule, ticks_to_ms
+from ossim.managers.process.policies import POLICIES, pick, preempts
+from ossim.model.process import READY, RUNNING, TERMINATED, Process
 
-DEFAULT_CONFIG = {
-    "policy": "fcfs",
-    "quantum_ms": 4,
-    "context_switch_ms": 0,
-    "aging": False,
-    "aging_interval_ms": 1,
-    "scenario_id": "default",
-}
+DEFAULT_CONFIG: dict[str, Any] = {"policy": "fcfs", "preemptive": False, "q": 4, "cs": 0, "aging": 0, "seed": 0}
+MAX_PROCESSES = 1000
+MAX_TIME_MS = 1_000_000          # largest arrival or burst accepted, in ms
 
 
-# class implementation
+def _num_to_ticks(name: str, value: Any, minimum: int) -> tuple[int | None, str | None]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None, f"{name} must be a number"
+    try:
+        ticks = ms_to_ticks(value)
+    except ValueError:
+        return None, f"{name} must be a non-negative multiple of 0.1 ms (got {value})"
+    if ticks < minimum:
+        return None, f"{name} must be at least {minimum / TICKS_PER_MS:g} ms (got {value})"
+    return ticks, None
+
+
 class ProcessManager(Manager):
-    """CPU scheduler."""
-
     name = "process"
+    controller: Controller | None = None
 
-    #constructor
     def __init__(self) -> None:
-        self._config: dict[str, Any] = dict(DEFAULT_CONFIG)
-        self._loaded: list[dict[str, Any]] = []
-        self._result: dict[str, Any] | None = None
-        self._events: list[Event] = []
-        self._time = 0
-        self._seq = 0
+        self.config: dict[str, Any] = dict(DEFAULT_CONFIG)
+        self._specs: list[dict[str, int | str]] = []
+        self.scenario_id = "default"
+        self._init_state()
 
-    #methods
+    # ------------------------------------------------------------------ state
+    def _init_state(self) -> None:
+        self.procs: dict[str, Process] = {
+            s["pid"]: Process(s["pid"], s["arrival"], s["burst"], s["priority"], s["order"]) for s in self._specs}
+        self.ready: list[Process] = []
+        self.running: Process | None = None
+        self.run_start = 0
+        self.last_pid: str | None = None
+        self.switches = 0
+        self.segments: list[dict[str, Any]] = []
+        self._pending = False                  # a dispatch/preempt is already scheduled for this tick
+        self._done = 0
+        self._t = 0
+        self._mode, self._mode_since = "idle", 0
+        self._acc = {"idle": 0, "run": 0, "switch": 0}
+        self._q_area, self._q_last, self._q_max = 0, 0, 0
+
+    @property
+    def _policy(self) -> str:
+        return self.config["policy"]
+
+    @property
+    def _cs(self) -> int:
+        return ms_to_ticks(self.config["cs"])
+
+    @property
+    def _quantum(self) -> int:
+        return ms_to_ticks(self.config["q"])
+
+    @property
+    def _aging(self) -> int:
+        return ms_to_ticks(self.config["aging"])
+
+    # --------------------------------------------------------------- Manager API
     def configure(self, config: dict[str, Any]) -> list[str]:
-        errors = self._check_config(config)
+        errors: list[str] = []
+        unknown = sorted(set(config) - set(DEFAULT_CONFIG))
+        if unknown:
+            errors.append(f"unknown setting(s): {', '.join(unknown)}")
+        new = {**self.config, **{k: v for k, v in config.items() if k in DEFAULT_CONFIG}}
+        if new["policy"] not in POLICIES:
+            errors.append(f"policy must be one of {', '.join(POLICIES)} (got {new['policy']!r})")
+        if not isinstance(new["preemptive"], bool):
+            errors.append("preemptive must be true or false")
+        _, e = _num_to_ticks("q", new["q"], 1)
+        errors += [e] if e else []
+        _, e = _num_to_ticks("cs", new["cs"], 0)
+        errors += [e] if e else []
+        _, e = _num_to_ticks("aging", new["aging"], 0)
+        errors += [e] if e else []
+        if isinstance(new["seed"], bool) or not isinstance(new["seed"], int):
+            errors.append("seed must be an integer")
         if errors:
-            return errors
-        new = dict(self._config)
-        new.update(config)
-        new["policy"] = resolve_policy(str(new["policy"]))
-        aging = new.get("aging", False)
-        if isinstance(aging, str):
-            aging = aging.strip().lower() in {"1", "true", "yes", "on"}
-        new["aging"] = bool(aging)
-        self._config = new
-        self._clear_run()
+            return errors                      # nothing changed
+        self.config = new
+        self.reset()
         return []
 
     def load(self, data: Any) -> list[str]:
-        errors, rows = self._parse_load(data)
+        if isinstance(data, (str, Path)):
+            try:
+                data = load_processes_csv(data)
+            except (InputError, OSError) as e:
+                return [str(e)]
+        if not isinstance(data, list) or not data:
+            return ["workload must be a non-empty list of processes"]
+        if len(data) > MAX_PROCESSES:
+            return [f"at most {MAX_PROCESSES} processes are supported (got {len(data)})"]
+        errors, specs, seen = [], [], set()
+        for i, row in enumerate(data):
+            where = f"process {i + 1}"
+            if not isinstance(row, dict) or not {"pid", "arrival", "burst", "priority"} <= set(row):
+                errors.append(f"{where}: needs pid, arrival, burst and priority")
+                continue
+            pid = row["pid"]
+            if not isinstance(pid, str) or not PID_RE.match(pid):
+                errors.append(f"{where}: invalid pid {pid!r}")
+                continue
+            if pid in seen:
+                errors.append(f"{where}: duplicate pid {pid}")
+                continue
+            seen.add(pid)
+            vals = [row["arrival"], row["burst"], row["priority"]]
+            if any(isinstance(v, bool) or not isinstance(v, int) for v in vals):
+                errors.append(f"{pid}: arrival, burst and priority must be integers")
+                continue
+            arrival, burst, prio = vals
+            if arrival < 0 or burst <= 0 or prio < 0:
+                errors.append(f"{pid}: arrival >= 0, burst > 0, priority >= 0 required")
+                continue
+            if arrival > MAX_TIME_MS or burst > MAX_TIME_MS:
+                errors.append(f"{pid}: arrival and burst must be at most {MAX_TIME_MS} ms")
+                continue
+            specs.append({"pid": pid, "arrival": ms_to_ticks(arrival), "burst": ms_to_ticks(burst), "priority": prio,
+                          "order": int(row.get("order", i))})
         if errors:
-            return errors
-        self._loaded = rows
-        self._clear_run()
+            return errors                      # nothing changed
+        self._specs = specs
+        self.reset()
         return []
 
     def reset(self) -> None:
-        self._clear_run()
+        self._init_state()
 
     def step(self, event: Event) -> list[Event]:
-        if not self._loaded:
-            return []
-        if event.event_type in {"RUN", "ADVANCE", "TICK"}:
-            return self.run({"max_time": event.time} if event.time else None)
-        self._time = event.time
-        self._seq = max(self._seq, event.seq)
-        return []
+        self._t = event.time
+        handler = getattr(self, "_on_" + event.event_type.lower(), None)
+        return handler(event) if handler else []
 
     def run(self, stop: dict[str, Any] | None = None) -> list[Event]:
-        if not self._loaded:
-            return []
-        policy = resolve_policy(str(self._config["policy"]))
-        quantum = ms_to_ticks(float(self._config["quantum_ms"]))
-        cs = ms_to_ticks(float(self._config["context_switch_ms"]))
-        age_iv = ms_to_ticks(float(self._config.get("aging_interval_ms", 1)))
-        tick_rows = []
-        for row in self._loaded:
-            tick_rows.append({
-                "pid": row["pid"],
-                "arrival": ms_to_ticks(row["arrival"]),
-                "burst": ms_to_ticks(row["burst"]),
-                "priority": row["priority"],
-                "order": row["order"],
-            })
+        """Run this manager on its own controller (used by unit tests and the dashboard server)."""
+        if self.controller is None:
+            ctl = Controller(seed=self.config["seed"], scenario_id=self.scenario_id)
+            ctl.register(self.name, self)
+            ctl.reset()
+        return self.controller.run(stop)
 
-        raw = schedule(
-            tick_rows,
-            policy,
-            quantum,
-            cs,
-            stop,
-            aging=bool(self._config.get("aging", False)),
-            aging_interval_ticks=age_iv,
-        )
-
-        self._result = raw
-        self._time = raw["time"]
-        scenario = str(self._config.get("scenario_id", "default"))
-        self._events = []
-        for rec in raw["events"]:
-            ev = Event(
-                seq=rec["seq"],
-                time=rec["time"],
-                scenario_id=scenario,
-                correlation_id=rec["entity_id"],
-                manager="process",
-                event_type=rec["event_type"],
-                entity_id=rec["entity_id"],
-                action=rec["action"],
-                prev_state=rec["prev_state"],
-                new_state=rec["new_state"],
-                outcome=rec["outcome"],
-                cost=rec["cost"],
-                severity=rec["severity"],
-                message=rec["message"],
-                phase=rec["phase"],
-            )
-
-            self._events.append(ev)
-        self._seq = len(self._events)
-        return list(self._events)
+    def is_done(self) -> bool:
+        return self._done == len(self.procs)
 
     def snapshot(self) -> dict[str, Any]:
-
-        ms = result_in_ms(self._result) if self._result else None
-        processes = []
-        for row in self._loaded:
-            extra = {}
-            if self._result:
-                extra = self._result["per_process"].get(row["pid"], {})
-            processes.append({
-                "pid": row["pid"],
-                "arrival_ms": row["arrival"],
-                "burst_ms": row["burst"],
-                "priority": row["priority"],
-                "order": row["order"],
-                "state": extra.get("state", "new"),
-                "remaining_ticks": extra.get("remaining"),
-            })
-
-        return {
-            "manager": self.name,
-            "policy": resolve_policy(str(self._config["policy"])),
-            "quantum_ms": self._config["quantum_ms"],
-            "context_switch_ms": self._config["context_switch_ms"],
-            "aging": self._config["aging"],
-            "aging_interval_ms": self._config.get("aging_interval_ms", 1),
-            "scenario_id": self._config.get("scenario_id", "default"),
-            "time_ticks": self._time,
-            "time_ms": ticks_to_ms(self._time),
-            "loaded": deepcopy(self._loaded),
-            "processes": processes,
-            "ready": list(self._result["ready"]) if self._result else [],
-            "running": self._result["running"] if self._result else None,
-            "gantt": ms["gantt"] if ms else [],
-            "per_process": ms["per_process"] if ms else {},
-            "averages": ms["averages"] if ms else {},
-            "makespan": ms["makespan"] if ms else 0,
-            "idle": ms["idle"] if ms else 0,
-            "cpu_utilization_pct": ms["cpu_utilization_pct"] if ms else 0,
-            "context_switch_time": ms["context_switch_time"] if ms else 0,
-            "event_count": len(self._events),
-        }
+        s = self._summary()
+        return {"policy": self._policy, "config": dict(self.config), "time": self._t, "finished": self.is_done() and bool(self.procs),
+                "running": self.running.pid if self.running else None, "ready": [p.pid for p in self.ready],
+                "cpu_mode": self._mode, "states": {p.pid: p.state for p in self.procs.values()}, **s}
 
     def metrics(self) -> dict[str, dict[str, Any]]:
-
-        snap = self.snapshot()
-        avg = snap.get("averages") or {}
-        n = len(self._loaded)
-        finished = 0
-        if self._result:
-            finished = sum(1 for m in self._result["per_process"].values() if m["completion"] is not None)
-        makespan_ms = snap["makespan"] or 0
-        throughput = (finished / makespan_ms) if makespan_ms else 0
+        s = self._summary()
+        a = s["averages"]
+        ms = lambda v: None if v is None else v / TICKS_PER_MS   # noqa: E731
         return {
-            "avg_turnaround": {"value": avg.get("turnaround", 0), "unit": "ms"},
-            "avg_waiting": {"value": avg.get("waiting", 0), "unit": "ms"},
-            "avg_response": {"value": avg.get("response", 0), "unit": "ms"},
-            "makespan": {"value": snap["makespan"], "unit": "ms"},
-            "cpu_utilization": {"value": snap["cpu_utilization_pct"], "unit": "percent"},
-            "idle_time": {"value": snap["idle"], "unit": "ms"},
-            "context_switch_time": {"value": snap["context_switch_time"], "unit": "ms"},
-            "throughput": {"value": throughput, "unit": "processes/ms"},
-            "dispatches": {
-                "value": sum((self._result["per_process"][p["pid"]]["dispatches"] if self._result else 0) for p in self._loaded),
-                "unit": "count",
-            },
-            "process_count": {"value": n, "unit": "count"},
-            "completed": {"value": finished, "unit": "count"},
+            "avg_turnaround": {"value": ms(a["turnaround"]), "unit": "ms"},
+            "avg_waiting": {"value": ms(a["waiting"]), "unit": "ms"},
+            "avg_response": {"value": ms(a["response"]), "unit": "ms"},
+            "makespan": {"value": ms(s["makespan"]), "unit": "ms"},
+            "cpu_utilization": {"value": s["cpu_utilization_pct"], "unit": "%"},
+            "idle_time": {"value": ms(s["idle"]), "unit": "ms"},
+            "context_switch_time": {"value": ms(s["context_switch_time"]), "unit": "ms"},
+            "context_switches": {"value": s["switches"], "unit": "count"},
+            "throughput": {"value": s["throughput_per_ms"], "unit": "processes/ms"},
+            "avg_queue_length": {"value": s["avg_queue_length"], "unit": "processes"},
+            "max_queue_length": {"value": s["max_queue_length"], "unit": "processes"},
+            "processes_finished": {"value": s["finished_count"], "unit": "count"},
         }
 
     def validate(self) -> list[str]:
-
-        msgs: list[str] = []
-        msgs.extend(self._check_config(self._config))
-        if not self._loaded:
-            msgs.append("warning: no processes loaded")
-        seen = set()
-        for i, row in enumerate(self._loaded):
-            pid = row.get("pid")
-            if pid in seen:
-                msgs.append(f"error: duplicate pid {pid}")
-            seen.add(pid)
-            if row.get("arrival", 0) < 0:
-                msgs.append(f"error: process {pid} arrival must be >= 0")
-            if row.get("burst", 0) <= 0:
-                msgs.append(f"error: process {pid} burst must be > 0")
-            if row.get("priority", 0) < 0:
-                msgs.append(f"error: process {pid} priority must be >= 0")
-            if i != row.get("order", i):
-                msgs.append(f"warning: process {pid} order {row.get('order')} does not match input position {i}")
-        if self._config.get("aging"):
-            msgs.append("warning: aging is not implemented; priority stays fixed")
-        if resolve_policy(str(self._config["policy"])) == "rr" and float(self._config["quantum_ms"]) <= 0:
-            msgs.append("error: round-robin quantum_ms must be > 0")
-        return msgs
+        out = []
+        if not self.procs:
+            out.append("error: no workload loaded")
+        if self._policy != "priority" and self.config["aging"] > 0:
+            out.append("warning: aging only applies to the priority policy and is ignored")
+        if self._policy != "rr":
+            out.append("info: quantum q is only used by round-robin")
+        if self._policy == "priority" and not self.config["preemptive"]:
+            out.append("info: priority is non-preemptive; aging can still change the pick")
+        if self._policy == "priority" and self.config["aging"] == 0:
+            out.append("warning: aging is off, so low-priority processes can starve")
+        return out
 
     def export(self, fmt: str = "json") -> str:
-
-        kind = fmt.lower().strip()
-        snap = self.snapshot()
-        mets = self.metrics()
-        if kind == "json":
-            payload = {
-                "snapshot": snap,
-                "metrics": mets,
-                "events": [e.to_dict() for e in self._events],
-            }
-            return json.dumps(payload, indent=2)
-        if kind == "csv":
+        events = list(self.controller.log) if self.controller else []
+        if fmt == "json":
+            return json.dumps({"config": self.config, "snapshot": self.snapshot(), "events": [e.to_dict() for e in events]}, indent=2)
+        if fmt == "csv":
+            cols = ["seq", "time", "time_ms"] + sorted(REQUIRED_FIELDS - {"seq", "time"})
             buf = io.StringIO()
-            writer = csv.writer(buf)
-            writer.writerow([
-                "pid", "arrival_ms", "burst_ms", "priority", "start_ms",
-                "completion_ms", "turnaround_ms", "waiting_ms", "response_ms", "dispatches",
-            ])
-            per = snap["per_process"]
-            for row in self._loaded:
-                m = per.get(row["pid"], {})
-                writer.writerow([
-                    row["pid"], row["arrival"], row["burst"], row["priority"],
-                    m.get("start"), m.get("completion"), m.get("turnaround"),
-                    m.get("waiting"), m.get("response"), m.get("dispatches"),
-                ])
+            w = csv.DictWriter(buf, fieldnames=cols, lineterminator="\n")
+            w.writeheader()
+            for e in events:
+                w.writerow({c: e.to_dict()[c] for c in cols})
             return buf.getvalue()
-        raise ValueError("export format must be 'json' or 'csv'")
+        raise ValueError(f"unknown export format {fmt!r}; use 'json' or 'csv'")
 
-    def _clear_run(self) -> None:
+    # ------------------------------------------------------------ event helpers
+    def _ev(self, time: int, phase: str, etype: str, entity: str, action: str, prev: str | None, new: str | None,
+            msg: str = "", cost: int = 0, corr: str = "") -> Event:
+        return Event(0, time, self.scenario_id, corr or entity, "process", etype, entity, action, prev, new, "ok",
+                     cost=cost, message=msg, phase=phase)
 
-        self._result = None
-        self._events = []
-        self._time = 0
-        self._seq = 0
+    def _decide(self, t: int) -> Event:
+        return self._ev(t, "dispatch", "DECIDE", "cpu", "internal", None, None, corr="cpu-decide")
 
-    def _check_config(self, config: dict[str, Any]) -> list[str]:
+    def _set_mode(self, t: int, mode: str) -> None:
+        self._acc[self._mode] += t - self._mode_since
+        self._mode, self._mode_since = mode, t
 
-        errors: list[str] = []
-        if not isinstance(config, dict):
-            return ["error: config must be a dictionary"]
-        if "policy" in config:
-            policy = resolve_policy(str(config["policy"]))
-            if policy not in POLICIES:
-                errors.append(f"error: unknown policy {config['policy']!r}; expected one of {', '.join(POLICIES)}")
-        for key in ("quantum_ms", "context_switch_ms"):
-            if key not in config:
-                continue
-            try:
-                value = float(config[key])
-            except (TypeError, ValueError):
-                errors.append(f"error: {key} must be a number")
-                continue
-            if value < 0:
-                errors.append(f"error: {key} must be >= 0")
-                continue
-            try:
-                ms_to_ticks(value)
-            except ValueError as exc:
-                errors.append(f"error: {key}: {exc}")
-        if "quantum_ms" in config:
-            try:
-                if float(config["quantum_ms"]) <= 0 and resolve_policy(str(config.get("policy", self._config["policy"]))) == "rr":
-                    errors.append("error: quantum_ms must be > 0 for round-robin")
-            except (TypeError, ValueError):
-                pass
-        return errors
+    def _qmark(self, t: int) -> None:
+        self._q_area += len(self.ready) * (t - self._q_last)
+        self._q_last = t
 
-    def _parse_load(self, data: Any) -> tuple[list[str], list[dict[str, Any]]]:
+    def _close_run(self, t: int) -> Process:
+        p = self.running
+        if p is None:
+            raise RuntimeError("no running process to take off the CPU")
+        p.remaining -= t - self.run_start
+        seg = self.segments[-1] if self.segments else None
+        if seg and seg["pid"] == p.pid and seg["end"] == self.run_start:
+            seg["end"] = t                      # keep back-to-back runs of one process as a single bar
+        else:
+            self.segments.append({"pid": p.pid, "start": self.run_start, "end": t})
+        self.running = None
+        self._set_mode(t, "idle")
+        return p
 
-        if data is None:
-            return ["error: load input is empty"], []
-        if isinstance(data, (str, Path)):
-            try:
-                rows = load_processes_csv(data)
-            except (OSError, InputError, ValueError) as exc:
-                return [f"error: {exc}"], []
-            return [], rows
-        if isinstance(data, dict) and "processes" in data:
-            data = data["processes"]
-        if not isinstance(data, list):
-            return ["error: load input must be a CSV path or a list of process records"], []
-        rows: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for i, raw in enumerate(data):
-            if not isinstance(raw, dict):
-                return [f"error: process {i} is not a record"], []
-            pid = str(raw.get("pid", "")).strip()
-            if not pid:
-                return [f"error: process {i} missing pid"], []
-            if pid in seen:
-                return [f"error: duplicate pid {pid}"], []
-            try:
-                arrival = int(raw["arrival"])
-                burst = int(raw["burst"])
-                priority = int(raw.get("priority", 0))
-            except (KeyError, TypeError, ValueError):
-                return [f"error: process {pid} needs integer arrival, burst, priority"], []
-            if arrival < 0 or burst <= 0 or priority < 0:
-                return [f"error: process {pid}: arrival >= 0, burst > 0, priority >= 0 required"], []
-            seen.add(pid)
-            rows.append({"pid": pid, "arrival": arrival, "burst": burst, "priority": priority, "order": int(raw.get("order", len(rows)))})
-        if not rows:
-            return ["error: no processes"], []
-        return [], rows
+    def _needs_switch(self, cand: Process) -> bool:
+        return self._cs > 0 and self.last_pid is not None and self.last_pid != cand.pid
+
+    def _dispatch_event(self, t: int, p: Process, *, switch: bool) -> Event:
+        if switch:
+            return self._ev(t, "dispatch", "CONTEXT_SWITCH", p.pid, "switch", READY, READY, cost=self._cs, corr=f"{p.pid}-cs",
+                            msg=f"CPU switches from {self.last_pid} to {p.pid} ({self._cs / TICKS_PER_MS:g} ms)")
+        return self._ev(t, "dispatch", "DISPATCH", p.pid, "dispatch", READY, RUNNING, corr=f"{p.pid}-run-{p.dispatches + 1}",
+                        msg=f"{p.pid} starts on the CPU ({p.remaining / TICKS_PER_MS:g} ms left)")
+
+    # ------------------------------------------------------------ event handlers
+    def _on_sim_start(self, event: Event) -> list[Event]:
+        self.scenario_id = event.scenario_id
+        out = [self._ev(p.arrival, "arrival", "ARRIVE", p.pid, "arrive", "new", READY, corr=f"{p.pid}-arrive",
+                        msg=f"{p.pid} arrives (burst {p.burst / TICKS_PER_MS:g} ms, priority {p.priority})")
+               for p in sorted(self.procs.values(), key=lambda q: (q.arrival, q.order))]
+        if self._policy == "priority" and self._aging > 0 and self.procs:
+            out.append(self._ev(self._aging, "preemption", "AGE_TICK", "cpu", "internal", None, None, corr="cpu-age"))
+        return out
+
+    def _on_arrive(self, event: Event) -> list[Event]:
+        p = self.procs[event.entity_id]
+        self._qmark(event.time)
+        p.transition(READY)
+        self.ready.append(p)
+        self._q_max = max(self._q_max, len(self.ready))
+        return [self._decide(event.time)]
+
+    def _on_decide(self, event: Event) -> list[Event]:
+        t = event.time
+        if self._pending or self._mode == "switch" or not self.ready:
+            return []
+        cand = pick(self._policy, self.ready)
+        if self.running is None:
+            self._pending = True
+            return [self._dispatch_event(t, cand, switch=self._needs_switch(cand))]
+        remaining_now = self.running.remaining - (t - self.run_start)
+        if preempts(self._policy, self.config["preemptive"], cand, self.running, remaining_now):
+            self._pending = True
+            token = f"{self.running.pid}-run-{self.running.dispatches}"
+            return [self._ev(t, "preemption", "PREEMPT", self.running.pid, "preempt", RUNNING, READY, corr=token,
+                             msg=f"{self.running.pid} preempted by {cand.pid}")]
+        return []
+
+    def _on_context_switch(self, event: Event) -> list[Event]:
+        t, p = event.time, self.procs[event.entity_id]
+        self._set_mode(t, "switch")
+        self.segments.append({"pid": "CS", "start": t, "end": t + self._cs})
+        return [self._ev(t + self._cs, "dispatch", "DISPATCH", p.pid, "dispatch", READY, RUNNING, corr=f"{p.pid}-run-{p.dispatches + 1}",
+                         msg=f"{p.pid} starts on the CPU ({p.remaining / TICKS_PER_MS:g} ms left)")]
+
+    def _on_dispatch(self, event: Event) -> list[Event]:
+        t, p = event.time, self.procs[event.entity_id]
+        self._qmark(t)
+        self.ready.remove(p)
+        p.transition(RUNNING)
+        p.dispatches += 1
+        if p.start is None:
+            p.start = t
+        p.eff_priority = p.priority              # any aging boost is used up once the process runs
+        if self.last_pid is not None and self.last_pid != p.pid:
+            self.switches += 1
+        self.last_pid = p.pid
+        self._set_mode(t, "run")
+        self.running, self.run_start = p, t
+        self._pending = False
+        if self._policy == "rr" and self._quantum < p.remaining:
+            return [self._ev(t + self._quantum, "quantum_expiry", "QUANTUM_EXPIRE", p.pid, "quantum_expire", RUNNING, READY,
+                             corr=event.correlation_id, msg=f"{p.pid} used its {self._quantum / TICKS_PER_MS:g} ms quantum")]
+        return [self._ev(t + p.remaining, "completion", "COMPLETE", p.pid, "complete", RUNNING, TERMINATED, corr=event.correlation_id,
+                         msg=f"{p.pid} finishes")]
+
+    def _on_complete(self, event: Event) -> list[Event]:
+        p = self._close_run(event.time)
+        if p.remaining != 0:
+            raise RuntimeError(f"{p.pid} completed with {p.remaining} ticks left")
+        p.transition(TERMINATED)
+        p.completion = event.time
+        self._done += 1
+        return [self._decide(event.time)]
+
+    def _on_quantum_expire(self, event: Event) -> list[Event]:
+        return self._leave_cpu(event)
+
+    def _on_preempt(self, event: Event) -> list[Event]:
+        self._pending = False
+        if self.controller is not None:           # the old COMPLETE / QUANTUM_EXPIRE for this run no longer applies
+            self.controller.cancel(lambda e: e.correlation_id == event.correlation_id and e.event_type in ("COMPLETE", "QUANTUM_EXPIRE"))
+        return self._leave_cpu(event)
+
+    def _leave_cpu(self, event: Event) -> list[Event]:
+        p = self._close_run(event.time)
+        self._qmark(event.time)
+        p.transition(READY)
+        p.preemptions += 1
+        self.ready.append(p)                      # after any same-tick arrivals, which ran in an earlier phase
+        self._q_max = max(self._q_max, len(self.ready))
+        return [self._decide(event.time)]
+
+    def _on_age_tick(self, event: Event) -> list[Event]:
+        t = event.time
+        out = [self._ev(t, "preemption", "PRIORITY_AGED", p.pid, "age", READY, READY, corr=f"{p.pid}-age",
+                        msg=f"{p.pid} priority {p.eff_priority} -> {p.eff_priority - 1}")
+               for p in self.ready if p.eff_priority > 0]
+        if self._done < len(self.procs):
+            out.append(self._ev(t + self._aging, "preemption", "AGE_TICK", "cpu", "internal", None, None, corr="cpu-age"))
+        out.append(self._decide(t))
+        return out
+
+    def _on_priority_aged(self, event: Event) -> list[Event]:
+        p = self.procs[event.entity_id]
+        p.eff_priority = max(0, p.eff_priority - 1)
+        return []
+
+    # ------------------------------------------------------------------ results
+    def _summary(self) -> dict[str, Any]:
+        finished = [p for p in self.procs.values() if p.completion is not None]
+        all_done = bool(self.procs) and len(finished) == len(self.procs)
+        end = max(p.completion for p in finished) if all_done else self._t
+        acc = dict(self._acc)
+        acc[self._mode] += max(0, end - self._mode_since)
+        q_area = self._q_area + len(self.ready) * max(0, end - self._q_last)
+        per = {}
+        for p in self.procs.values():
+            done = p.completion is not None
+            tat = p.completion - p.arrival if done else None
+            per[p.pid] = {"start": p.start, "completion": p.completion, "turnaround": tat,
+                          "waiting": tat - p.burst if done else None,
+                          "response": p.start - p.arrival if p.start is not None else None,
+                          "dispatches": p.dispatches, "preemptions": p.preemptions, "final_state": p.state}
+        def avg(key: str) -> float | None:
+            vals = [m[key] for m in per.values() if m[key] is not None]
+            return sum(vals) / len(vals) if vals else None
+        gantt, cursor = [], 0
+        for seg in self.segments:                 # make idle time visible as its own segment
+            if seg["start"] > cursor:
+                gantt.append({"pid": "IDLE", "start": cursor, "end": seg["start"]})
+            gantt.append(dict(seg))
+            cursor = seg["end"]
+        return {"gantt": gantt, "per_process": per,
+                "averages": {"turnaround": avg("turnaround"), "waiting": avg("waiting"), "response": avg("response")},
+                "makespan": end, "cpu_utilization_pct": 100.0 * acc["run"] / end if end else 0.0,
+                "idle": acc["idle"], "context_switch_time": acc["switch"], "switches": self.switches,
+                "throughput_per_ms": len(finished) / end * TICKS_PER_MS if end else 0.0,
+                "avg_queue_length": q_area / end if end else 0.0, "max_queue_length": self._q_max,
+                "finished_count": len(finished)}
