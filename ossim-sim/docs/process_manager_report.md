@@ -19,7 +19,7 @@ Implements:
 ## 2. Time, Records, and Determinism
 
 Simulated time is an **integer tick**.
- One tick is 0.1 ms.
+One tick is 0.1 ms.
 
 Preemption happens when process has shorter remaining time, or a  smaller priority number. 
 
@@ -42,7 +42,7 @@ The process manager sets `manager="process"` and uses the PID as `correlation_id
 
 ## 4. Data model
 
-A PCB is a plain object with integer fields only:
+A PCB (process control block) is a plain object with integer fields only:
 
 ```python
 class PCB:
