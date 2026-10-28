@@ -62,7 +62,6 @@ def pick_ready(
     aging: bool = False,
     aging_interval: int = 0,
 ) -> str | None:
-    """Choose the next process. FCFS/RR: head of the list. Others: scan for best."""
     if not ready:
         return None
     if policy in ("fcfs", "rr"):
@@ -94,7 +93,7 @@ def _better_for_pick(a: PCB, b: PCB, policy: str, aging: bool = False, interval:
 def _strictly_better_running(
     cand: PCB, current: PCB, policy: str, aging: bool = False, interval: int = 0
 ) -> bool:
-    """Preempt only when the candidate is strictly better (ADR / README tie-breakers)."""
+
     if policy == "srtf":
         return cand.remaining < current.remaining
     if policy == "priority_p":
@@ -419,7 +418,7 @@ def schedule(
 
 
 def result_in_ms(raw: dict) -> dict:
-    """Convert tick fields used by the dashboard / expected_results JSON to ms."""
+
 
     def conv_seg(seg: dict) -> dict:
         return {"pid": seg["pid"], "start": ticks_to_ms(seg["start"]), "end": ticks_to_ms(seg["end"])}
