@@ -4,7 +4,7 @@ Deterministic discrete-event operating-system simulator with process, memory, fi
 managers, a parallel-computing component, and a local web dashboard. **Simulation only:** it never runs host commands,
 touches real user files, or sends network traffic.
 
-**Status:** Milestone 2 (process manager + simulation core + dashboard demo)
+**Status:** Milestone 3 (Working modules and dashboard views, metrics, visuals, tests, comparison results, integration contract/FIFO/LRU, trace import, frame state; file tree, commands, path/error handling.)
 
 | Member | Role |
 | --- | --- |
