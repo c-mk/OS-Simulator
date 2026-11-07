@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OS Simulator Dashboard — Milestone 2 Process Demo</title>
+<title>OS Simulator Dashboard — Milestone 3 Process, Memory and File</title>
 <style>
 :root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2330;--muted:#5d6676;--line:#d9dde4;--acc:#2f6fdb;--ok:#1f8a4c;--warn:#b26a00;--bad:#c23b3b;
 --p1:#2f6fdb;--p2:#e0702b;--p3:#1d9e74;--p4:#b8860b;--cs:#555;--idle:#bbb}
@@ -46,6 +46,15 @@ details{margin:8px 0}summary{cursor:pointer}
 #toast{position:fixed;bottom:16px;right:16px;background:#162033;color:#fff;padding:10px 14px;border-radius:8px;opacity:0;transition:.2s;max-width:340px}
 #toast.show{opacity:1}
 .sr{position:absolute;left:-9999px}
+.tline{display:flex;flex-wrap:wrap;gap:3px;margin:6px 0}.tline .c{width:30px;text-align:center;border:1px solid #777;border-radius:3px;font-size:12px;font-weight:600;padding:2px 0}
+.c.h{background:#e9f7ef;color:#14532d}.c.f{background:#fde8e8;color:#7f1d1d}
+.frames td.loaded{font-weight:700;outline:2px solid #1d2330;outline-offset:-2px}
+.tnode{font:inherit;border:0;background:none;cursor:pointer;padding:1px 4px;border-radius:4px;color:var(--ink)}.tnode:hover,.tnode[aria-pressed=true]{background:#e7efff}
+.tnode:focus-visible,.tog:focus-visible{outline:3px solid #ffbf47;outline-offset:1px}
+.tree ul{list-style:none;margin:0;padding-left:20px}.tog{border:0;background:none;cursor:pointer;width:20px;font:inherit;display:inline-block;color:var(--ink)}
+.metrics{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}.metrics .m{background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 12px;min-width:110px}.metrics b{display:block;font-size:18px}
+.b-bad{color:var(--bad);border-color:var(--bad)}textarea.mono{font-family:ui-monospace,Menlo,monospace;width:100%}
+.btn:disabled{opacity:.45;cursor:not-allowed}
 </style></head><body>
 <header>
  <h1>OS Simulator</h1>
@@ -67,7 +76,7 @@ details{margin:8px 0}summary{cursor:pointer}
  <button data-page="security">Security</button><button data-page="device">Device</button><button data-page="network">Network</button>
  <button data-page="parallel">Parallel</button>
  <div class="grp">Workflow</div>
- <button data-page="scenario">Scenario builder</button><button data-page="testing">Testing center</button>
+ <button data-page="integration">Integration demo</button><button data-page="scenario">Scenario builder</button><button data-page="testing">Testing center</button>
  <button data-page="compare">Comparison center</button><button data-page="events">Event explorer</button><button data-page="export">Export</button>
 </nav>
 <main id="main" tabindex="-1"></main>
@@ -215,9 +224,10 @@ function endState(){ return RUN&&RUN.res.finished===false?"Stopped":"Finished"; 
 function stopTimer(){ if(TIMER){clearInterval(TIMER);TIMER=null} }
 function sync(){ setClock(visibleUntil()); drawRun(); }
 async function ctl(act){
+  if(CURPAGE==="memory"||CURPAGE==="file"||CURPAGE==="integration") return pageCtl(act);
   if(!$("#alg")){ show("process"); await engineStatus(); banner(); }
   if(act==="Reset"){ stopTimer(); RUN=null; CUR=0; setClock(0); setState("Ready"); const o=$("#pout"); if(o) o.innerHTML=""; showMsgs([]); toast("Reset: run cleared, inputs kept"); return; }
-  if(act==="Batch"){ toast("Batch runs are planned for Milestone 3. Use the Comparison center for several policies."); return; }
+  if(act==="Batch"){ toast("Batch runs are planned for a later milestone. Use the Comparison center for several policies."); return; }
   if(act==="Pause"){ if(TIMER){stopTimer(); setState("Paused");} return; }
   if(!RUN){ CUR=0; if(!(await loadRun())) return; }
   const n=RUN.events.length;
@@ -252,6 +262,7 @@ async function runChecks(){
     rows.push([name,"Unit: process",ok,`Gantt ${ge}; avg TAT/wait/resp ${ae}; makespan ${exp.makespan}`,`Gantt ${ga}; avg ${aa}; makespan ${n.makespan}`,ok?"matches":"differs from the hand-calculated values"]); }
   for(const [name,csv,frag] of BAD_CASES){ prog.textContent="Running "+name+"..."; const r=await post("/api/process/run",{csv}); const msg=(r.j.errors||[]).join(" | ");
     const ok=r.status===422&&msg.includes(frag); if(ok) pass++; rows.push([name,"Invalid input",ok,`rejected (422) with a message containing "${frag}"`,`${r.status}: ${msg||"accepted"}`,ok?"rejected, nothing changed":"not rejected as expected"]); }
+  const extra=await m3Rows(prog); rows.push(...extra); pass+=extra.filter(r=>r[2]).length;
   prog.textContent=""; const bad=rows.length-pass;
   out.innerHTML=`<p><b>${pass} of ${rows.length} checks passed</b>${bad?` · <span class="err">${bad} failed</span>`:""}</p><table><tr><th>Test</th><th>Suite</th><th>Status</th><th>Expected</th><th>Actual</th><th>Diagnostics</th></tr>`+
     rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]?'<span class="badge b-ok">PASS</span>':'<span class="badge b-warn">FAIL</span>'}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td></tr>`).join("")+`</table>`;
@@ -271,12 +282,277 @@ function ptable(res){
 }
 const placeholder = (title, owner, ms, panels) => `<h2>${title}</h2><p class="sub">Owner: ${owner} · Built in ${ms}</p>${protoNote("final layout of this workspace. Panels show what each area will contain; data appears when the manager is implemented.")}
  <div class="grid">${panels.map(p=>`<div class="card"><h3>${p[0]}</h3><p class="sub" style="margin:0">${p[1]}</p></div>`).join("")}</div>`;
+/* ===== Milestone 3: Memory, File and Integration pages (all values come from the engine over /api/) ===== */
+let CURPAGE="overview", MEM=null, MEMCMP=null, FIL=null, FSTEP=0, INT=null;
+let MEMTRACE=null, FSCRIPT=null, FUSER="admin", FROOT="755";
+const TRACE_BASE=["0x0040","0x10A0","0x0044","0x20B0","0x3010","0x0048","0x10A4","0x4000","0x0050","0x20B4"].join("\n");
+const TRACE_LOC=["0x0040","0x10A0","0x0044","0x10B0","0x2010","0x0048","0x10A4","0x3000","0x0050","0x10B4","0x4020","0x0054","0x10A8","0x2014","0x0058","0x10AC","0x3004","0x005C","0x10B8","0x4024"].join("\n");
+const FS_SAMPLE=["mkdir /home","mkdir /home/alice","mkdir /home/alice/docs","mkfile /home/alice/docs/todo.txt","write /home/alice/docs/todo.txt \"buy milk\"",
+ "append /home/alice/docs/todo.txt \", eggs\"","mkfile /home/alice/docs/empty.txt","ls /home/alice","ls /home/alice/docs","cat /home/alice/docs/todo.txt",
+ "mkdir /home/alice/docs","mkfile /nodir/x.txt","cat /home/alice/docs/nothing.txt","rm /home/alice/docs","rmdir /home/alice/docs",
+ "write /home/alice/docs/empty.txt \"x\"","rm /home/alice/docs/empty.txt","rm /home/alice/docs/todo.txt","rmdir /home/alice/docs","ls /home"].join("\n");
+const FS_BASE=["mkdir /docs","mkfile /docs/notes.txt","write /docs/notes.txt \"Hello\"","append /docs/notes.txt \" OS\"","cat /docs/notes.txt","ls /docs",
+ "mkdir /docs","cat /docs/missing.txt","rmdir /docs","rm /docs/notes.txt","rmdir /docs","ls /"].join("\n");
+const INT_PROCS="pid,arrival,burst,priority\nP1,0,8,3\nP2,1,4,1\nP3,2,9,4\nP4,3,5,2";
+const INT_TRACES="P1: 0x0000 0x1000 0x0000 0x2000 0x3000 0x0000 0x1000 0x4000\nP2: 0x0000 0x1000 0x2000 0x0000";
+const INT_USERS="P1=alice\nP2=bob\nP3=guest\nP4=admin";
+const INT_REQS=["P1 1 mkdir /shared","P1 2 mkfile /shared/a.txt","P1 3 write /shared/a.txt \"report\"","P2 9 cat /shared/a.txt","P2 10 write /shared/a.txt \"edit\"",
+ "P3 13 cat /shared/a.txt","P3 14 mkfile /shared/b.txt","P4 22 rm /shared/a.txt"].join("\n");
+const INTSTATE={procs:INT_PROCS,traces:INT_TRACES,users:INT_USERS,reqs:INT_REQS,policy:"fcfs",lat:"1.0"};
+
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function dl(name,text,type){ const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type:type||"text/csv"})); a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),500); toast("Saved "+name); }
+const csvq=v=>{const s=String(v??"");return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};
+const toCsv=(head,rows)=>[head,...rows].map(r=>r.map(csvq).join(",")).join("\n")+"\n";
+const metric=(l,v,u)=>`<div class="m"><span class="sub" style="margin:0">${l}</span><b>${v}${u?` <small>${u}</small>`:""}</b></div>`;
+function showErrs(el,errs){ el.innerHTML=errs.map(e=>`<div class="err" role="alert">✗ ${esc(e)}</div>`).join(""); }
+const notConnected=()=>`<div class="err" role="alert">Engine not connected: start the dashboard with <code>python -m ossim.ui</code>. Nothing was run.</div>`;
+const mv=(m,k)=>m[k].value;
+const hex=a=>"0x"+a.toString(16).toUpperCase().padStart(4,"0");
+function msToTicks(v,label,errs){ const t=v*10; if(!isFinite(t)||t<0||Math.abs(t-Math.round(t))>1e-9){ errs.push(label+" must be a multiple of 0.1 ms, 0 or more"); return 0; } return Math.round(t); }
+const eventsCsv=ev=>toCsv(["seq","time_ms","manager","event_type","entity_id","action","prev_state","new_state","outcome","cost_ms","severity","message"],
+  ev.map(e=>[e.seq,e.time/10,e.manager,e.event_type,e.entity_id,e.action,e.prev_state??"",e.new_state??"",e.outcome,e.cost/10,e.severity,e.message]));
+
+/* ---------- Memory ---------- */
+function memBody(policy){
+  const errs=[], ps=+$("#mps").value, fr=+$("#mfr").value;
+  if(!Number.isInteger(ps)||ps<1) errs.push("Page size must be a whole number of at least 1");
+  if(!Number.isInteger(fr)||fr<1) errs.push("Frames must be a whole number of at least 1");
+  const hit=msToTicks(+$("#mhit").value,"Hit time",errs), flt=msToTicks(+$("#mflt").value,"Fault time",errs);
+  if($("#mtrace").value.split("\n").length>5000) errs.push("The trace has more than 5000 lines");
+  return {errs, body:{trace:$("#mtrace").value, policy, page_size:ps, frames:fr, hit_ticks:hit, fault_ticks:flt}};
+}
+async function memRun(mode){
+  const out=$("#mout"), pol=$("#mp").value.toLowerCase(), {errs,body}=memBody(pol);
+  if(errs.length){ showErrs(out,errs); return false; }
+  await engineStatus(); if(!(ENGINE&&ENGINE.engine)){ out.innerHTML=notConnected(); return false; }
+  if(mode==="compare"){ const r=await post("/api/memory/compare",body); if(!r.ok){ showErrs(out,r.j.errors||["Request failed"]); return false; } MEMCMP=r.j.runs; MEM=r.j.runs[pol]; }
+  else { const r=await post("/api/memory/run",body); if(!r.ok){ showErrs(out,r.j.errors||["Request failed"]); return false; } MEM=r.j; }
+  setClock(MEM.snapshot.clock/10); setState("Finished"); drawMem(); return true;
+}
+function memCompareHtml(){
+  if(!MEMCMP) return `<div class="note">No comparison yet. Press <b>Compare FIFO vs LRU</b> on the Memory page: both policies run on the identical trace.</div>`;
+  const rows=["fifo","lru"].map(k=>{ const m=MEMCMP[k].metrics; return {k:k.toUpperCase(),refs:mv(m,"references"),hits:mv(m,"hits"),faults:mv(m,"faults"),ev:mv(m,"evictions"),fr:mv(m,"fault_rate"),hr:mv(m,"hit_rate"),avg:mv(m,"avg_access_time")}; });
+  const mx=Math.max(1,...rows.map(r=>r.faults)), d=rows[0].faults-rows[1].faults;
+  const verdict=d>0?`LRU had ${d} fewer faults than FIFO on this trace.`:d<0?`FIFO had ${-d} fewer faults than LRU on this trace.`:"FIFO and LRU had the same number of faults on this trace.";
+  const bars=rows.map((r,i)=>`<text x="4" y="${24+i*34}" font-size="13">${r.k}</text><rect x="60" y="${10+i*34}" width="${r.faults/mx*300}" height="22" fill="${i?"#1d9e74":"#2f6fdb"}"/><text x="${66+r.faults/mx*300}" y="${26+i*34}" font-size="13">${r.faults} faults</text>`).join("");
+  return `<table><caption class="sr">FIFO versus LRU on the same trace</caption><tr><th>Policy</th><th>References</th><th>Hits</th><th>Faults</th><th>Evictions</th><th>Fault rate (%)</th><th>Hit rate (%)</th><th>Avg access (ms)</th></tr>
+   ${rows.map(r=>`<tr><td><b>${r.k}</b></td><td>${r.refs}</td><td>${r.hits}</td><td>${r.faults}</td><td>${r.ev}</td><td>${fx(r.fr)}</td><td>${fx(r.hr)}</td><td>${fx(r.avg,3)}</td></tr>`).join("")}</table>
+   <p><b>${verdict}</b></p>
+   <svg role="img" aria-label="Bar chart of page faults: ${rows.map(r=>r.k+" "+r.faults).join(", ")}" width="480" height="82" viewBox="0 0 480 82" style="background:#fff;border:1px solid var(--line);border-radius:6px"><title>Page faults by policy</title>${bars}</svg>`;
+}
+function drawMem(){
+  const el=$("#mout"); if(!el||!MEM) return;
+  const s=MEM.snapshot, m=MEM.metrics, refs=s.references, nfr=s.frames.length;
+  const multi=new Set(refs.map(r=>r.pid)).size>1, lab=c=>c?(multi?`${c.pid}:${c.page}`:`${c.page}`):"";
+  let h=`<h3>Results: ${s.policy.toUpperCase()}</h3><div class="metrics">`+metric("References",mv(m,"references"))+metric("Hits",mv(m,"hits"))+metric("Faults",mv(m,"faults"))+metric("Evictions",mv(m,"evictions"))
+   +metric("Fault rate",fx(mv(m,"fault_rate")),"%")+metric("Hit rate",fx(mv(m,"hit_rate")),"%")+metric("Avg access time",fx(mv(m,"avg_access_time"),3),"ms")+`</div>`;
+  if(MEM.warnings&&MEM.warnings.length) h+=`<div class="note">${MEM.warnings.map(esc).join("<br>")}</div>`;
+  h+=`<h3>Hit / fault timeline</h3><div class="tline" role="img" aria-label="Hit and fault timeline: ${refs.map(r=>r.result).join(" ")}">`+
+     refs.map(r=>`<span class="c ${r.hit?"h":"f"}" title="Reference ${r.index}: page ${r.page} ${r.hit?"hit":"fault"}">${r.result}</span>`).join("")+`</div><p class="sub">H = hit, F = fault. The letters carry the meaning, not just the colour.</p>`;
+  const cw=30, W=60+refs.length*cw, H=22+nfr*28+8;
+  let svg=`<svg role="img" aria-label="Frame occupancy over time: ${nfr} frames across ${refs.length} references" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:#fff;border:1px solid var(--line);border-radius:6px"><title>Frame occupancy over time</title>`;
+  for(let f=0;f<nfr;f++) svg+=`<text x="4" y="${38+f*28}" font-size="12">Frame ${f}</text>`;
+  refs.forEach((r,i)=>{ const x=56+i*cw; svg+=`<text x="${x+cw/2-2}" y="14" font-size="11" text-anchor="middle" font-weight="700" fill="${r.hit?"#14532d":"#7f1d1d"}">${r.result}</text>`;
+    r.frames_after.forEach((c,f)=>{ const loaded=!r.hit&&r.frame===f; svg+=`<rect x="${x}" y="${22+f*28}" width="${cw-2}" height="24" fill="${c?(loaded?"#fde8e8":"#eef2fa"):"#fff"}" stroke="${loaded?"#7f1d1d":"#c9d0dc"}" stroke-width="${loaded?2:1}"/><text x="${x+cw/2-1}" y="${38+f*28}" font-size="11" text-anchor="middle">${esc(lab(c))}</text>`; }); });
+  svg+=`</svg>`;
+  h+=`<h3>Frame occupancy over time</h3><div style="overflow-x:auto">${svg}</div><p class="sub">Each column is one reference; a boxed cell is the frame loaded by a fault. Page numbers${multi?" are shown as PID:page":""}.</p>`;
+  h+=`<details open><summary>Frame state after every reference (text version)</summary><div style="max-height:380px;overflow:auto"><table class="frames"><tr><th>#</th><th>t (ms)</th><th>Address</th><th>Page</th>${s.frames.map((_,f)=>`<th>Frame ${f}</th>`).join("")}<th>Result</th><th>Evicted</th></tr>`+
+    refs.map(r=>`<tr><td>${r.index}</td><td>${(r.time/10).toFixed(1)}</td><td>${hex(r.address)}</td><td>${multi?r.pid+":":""}${r.page}</td>${r.frames_after.map((c,f)=>`<td${!r.hit&&r.frame===f?' class="loaded"':""}>${esc(lab(c))}</td>`).join("")}<td class="${r.hit?"h":"f"}">${r.hit?"Hit":"Fault"}</td><td>${r.evicted==null?"":(multi?r.evicted_pid+":":"")+r.evicted}</td></tr>`).join("")+`</table></div></details>`;
+  const pts=Object.entries(s.page_tables);
+  h+=`<details><summary>Page table at the end of the run</summary><table><tr><th>PID</th><th>Page</th><th>Frame</th></tr>${pts.map(([pid,t])=>Object.entries(t).sort((a,b)=>+a[0]-+b[0]).map(([pg,fr])=>`<tr><td>${esc(pid)}</td><td>${pg}</td><td>${fr}</td></tr>`).join("")).join("")||`<tr><td colspan="3">No resident pages</td></tr>`}</table></details>`;
+  h+=`<h3>Policy comparison (identical trace)</h3>`+memCompareHtml();
+  h+=`<div class="row" style="margin-top:12px"><button class="btn ghost" id="mexcsv">Export results (CSV)</button><button class="btn ghost" id="mexev">Export event log (CSV)</button><button class="btn ghost" id="mexjson">Export run (JSON)</button></div>`;
+  el.innerHTML=h;
+  $("#mexcsv").onclick=()=>dl("memory_results.csv",memRefsCsv());
+  $("#mexev").onclick=()=>dl("memory_events.csv",eventsCsv(MEM.events));
+  $("#mexjson").onclick=()=>dl("memory_run.json",JSON.stringify(MEM,null,2),"application/json");
+}
+function memRefsCsv(){ return toCsv(["index","time_ms","pid","address","page","offset","frame","result","cost_ms","evicted_page","evicted_pid"],
+  MEM.snapshot.references.map(r=>[r.index,r.time/10,r.pid,hex(r.address),r.page,r.offset,r.frame,r.result,r.cost/10,r.evicted??"",r.evicted_pid??""])); }
+function memCompareCsv(){ return toCsv(["policy","references","hits","faults","evictions","fault_rate_pct","hit_rate_pct","avg_access_ms"],
+  ["fifo","lru"].map(k=>{const m=MEMCMP[k].metrics;return [k,mv(m,"references"),mv(m,"hits"),mv(m,"faults"),mv(m,"evictions"),mv(m,"fault_rate"),mv(m,"hit_rate"),mv(m,"avg_access_time")];})); }
+function wireMemory(){
+  if(MEMTRACE===null) MEMTRACE=TRACE_BASE;
+  $("#mtrace").value=MEMTRACE; $("#mtrace").oninput=()=>{MEMTRACE=$("#mtrace").value};
+  $("#mrun").onclick=()=>memRun("run"); $("#mcmp").onclick=()=>memRun("compare");
+  $("#mbase").onclick=()=>{MEMTRACE=TRACE_BASE;$("#mtrace").value=MEMTRACE;toast("Baseline trace restored")};
+  $("#mloc").onclick=()=>{MEMTRACE=TRACE_LOC;$("#mtrace").value=MEMTRACE;toast("Locality trace loaded: pages 0 and 1 are re-used often")};
+  banner(); engineStatus().then(banner);
+  if(MEM) drawMem();
+}
+
+/* ---------- File ---------- */
+async function fileRun(n){
+  const out=$("#fout"); await engineStatus(); if(!(ENGINE&&ENGINE.engine)){ out.innerHTML=notConnected(); return false; }
+  const body={script:$("#fscript").value,user:$("#fuser").value}; if($("#froot").value==="775") body.setup=[{path:"/",mode:"775",group:"staff"}];
+  if(n) body.stop={max_events:n};
+  const r=await post("/api/file/run",body); if(!r.ok){ showErrs(out,r.j.errors||["Request failed"]); return false; }
+  FIL=r.j; setClock(FIL.snapshot.clock/10); setState(FIL.snapshot.processed>=FIL.snapshot.script_length?"Finished":"Paused"); drawFile(); return true;
+}
+const modeStr=m=>[...m].map(d=>{d=+d;return (d&4?"r":"-")+(d&2?"w":"-")+(d&1?"x":"-")}).join("");
+function allNodes(n,out=[]){ out.push(n); (n.children||[]).forEach(c=>allNodes(c,out)); return out; }
+function treeHtml(n){
+  const kids=n.children||[], label=n.is_dir?(n.name==="/"?"/":esc(n.name)+"/"):`${esc(n.name)} (${n.size} B)`;
+  return `<li>${kids.length?`<button class="tog" aria-expanded="true" aria-label="Collapse ${esc(n.name)}">▾</button>`:`<span class="tog"></span>`}<button class="tnode" data-path="${esc(n.path)}" aria-pressed="false">${n.is_dir?"[dir]":"[file]"} ${label}</button>${kids.length?`<ul>${kids.map(treeHtml).join("")}</ul>`:""}</li>`;
+}
+function nodePanel(n){
+  return `<h3>Metadata: ${esc(n.path)}</h3><table><tr><th>Type</th><td>${n.is_dir?"directory":"file"}</td></tr><tr><th>Owner : group</th><td>${esc(n.owner)} : ${esc(n.group)}</td></tr>
+   <tr><th>Permissions</th><td>${modeStr(n.mode)} (${n.mode})</td></tr><tr><th>Size</th><td>${n.size} B</td></tr><tr><th>Created</th><td>${(n.created/10).toFixed(1)} ms</td></tr><tr><th>Modified</th><td>${(n.modified/10).toFixed(1)} ms</td></tr></table>`;
+}
+function drawFile(){
+  const el=$("#fout"); if(!el||!FIL) return;
+  const s=FIL.snapshot, m=FIL.metrics, files=allNodes(s.tree).filter(n=>!n.is_dir).sort((a,b)=>b.size-a.size);
+  let h=`<h3>Results</h3><div class="metrics">`+metric("Commands",`${s.processed} of ${s.script_length}`)+metric("Succeeded",mv(m,"succeeded"))+metric("Failed (safe errors)",mv(m,"failed"))+metric("Denied",mv(m,"denied"))
+   +metric("Bytes written",mv(m,"bytes_written"),"B")+metric("Bytes read",mv(m,"bytes_read"),"B")+metric("Storage used",mv(m,"storage_used"),"B")+metric("Files and dirs",mv(m,"nodes"))+metric("Avg latency",fx(mv(m,"avg_latency"),2),"ms")+`</div>`;
+  if(FIL.warnings&&FIL.warnings.length) h+=`<div class="note">${FIL.warnings.map(esc).join("<br>")}</div>`;
+  h+=`<div class="row"><div class="card tree" style="min-width:260px;flex:1"><h3>File tree</h3><ul style="padding-left:0;margin:0">${treeHtml(s.tree)}</ul><p class="sub" style="margin:8px 0 0">Select an item for its metadata. Use the arrow to collapse a directory.</p></div>
+   <div class="card" id="fmeta" style="flex:1;min-width:260px">${nodePanel(s.tree)}</div></div>`;
+  const mx=Math.max(1,...files.map(f=>f.size));
+  h+=`<h3>Storage composition</h3>${files.length?`<table><caption class="sr">Storage used by each file</caption><tr><th>File</th><th>Size (B)</th><th style="width:45%">Share of the largest file</th></tr>${files.map(f=>`<tr><td>${esc(f.path)}</td><td>${f.size}</td><td><div class="bar" style="width:${f.size/mx*100}%;min-width:2px" aria-hidden="true"></div></td></tr>`).join("")}</table>`:`<p class="sub">No files are stored right now.</p>`}
+   <p class="sub">${s.storage_bytes} B used by ${files.length} file(s) and ${s.node_count-files.length} director${s.node_count-files.length===1?"y":"ies"} (limit 10,000,000 B).</p>`;
+  h+=`<h3>Operation log</h3><div style="max-height:420px;overflow:auto"><table><tr><th>#</th><th>t (ms)</th><th>User</th><th>Command</th><th>Result</th><th>Output / error</th></tr>`+
+   s.log.map(r=>`<tr><td>${r.index}</td><td>${(r.time/10).toFixed(1)}</td><td>${esc(r.user)}</td><td><code>${esc(r.cmd+" "+r.args.join(" "))}</code></td><td>${r.outcome==="ok"?'<span class="badge b-ok">✓ ok</span>':r.outcome==="denied"?'<span class="badge b-bad">⛔ denied</span>':'<span class="badge b-warn">✗ error</span>'}</td><td>${esc(r.ok?r.output:r.error).replace(/\n/g,"<br>")}</td></tr>`).join("")+`</table></div>`;
+  h+=`<h3>Operations and simulated latency by command</h3><table><tr><th>Command</th><th>Count</th><th>ok</th><th>error</th><th>denied</th><th>Total latency (ms)</th><th>Average (ms)</th></tr>`+
+   Object.entries(s.per_command).map(([c,v])=>`<tr><td>${c}</td><td>${v.count}</td><td>${v.ok}</td><td>${v.failed}</td><td>${v.denied}</td><td>${(v.total_ticks/10).toFixed(1)}</td><td>${fx(v.avg_ms,2)}</td></tr>`).join("")+`</table>`;
+  h+=`<div class="row" style="margin-top:12px"><button class="btn ghost" id="fexcsv">Export operation log (CSV)</button><button class="btn ghost" id="fexev">Export event log (CSV)</button><button class="btn ghost" id="fexjson">Export run (JSON)</button></div>`;
+  el.innerHTML=h;
+  el.querySelectorAll(".tnode").forEach(b=>b.onclick=()=>{ el.querySelectorAll(".tnode").forEach(x=>x.setAttribute("aria-pressed","false")); b.setAttribute("aria-pressed","true"); const n=allNodes(s.tree).find(x=>x.path===b.dataset.path); if(n) $("#fmeta").innerHTML=nodePanel(n); });
+  el.querySelectorAll(".tog").forEach(b=>{ if(!b.textContent) return; b.onclick=()=>{ const ul=b.parentElement.querySelector("ul"), open=b.getAttribute("aria-expanded")==="true"; ul.style.display=open?"none":""; b.setAttribute("aria-expanded",String(!open)); b.textContent=open?"▸":"▾"; }; });
+  $("#fexcsv").onclick=()=>dl("file_operations.csv",FIL.csv);
+  $("#fexev").onclick=()=>dl("file_events.csv",eventsCsv(FIL.events));
+  $("#fexjson").onclick=()=>dl("file_run.json",JSON.stringify(FIL,null,2),"application/json");
+}
+function wireFile(){
+  if(FSCRIPT===null) FSCRIPT=FS_SAMPLE;
+  $("#fscript").value=FSCRIPT; $("#fscript").oninput=()=>{FSCRIPT=$("#fscript").value;FSTEP=0};
+  $("#fuser").value=FUSER; $("#fuser").onchange=()=>{FUSER=$("#fuser").value;FSTEP=0};
+  $("#froot").value=FROOT; $("#froot").onchange=()=>{FROOT=$("#froot").value;FSTEP=0};
+  $("#frun").onclick=()=>{FSTEP=0;fileRun(0)}; $("#fstep").onclick=()=>fileStep(); $("#freset").onclick=()=>fileReset();
+  $("#fbase").onclick=()=>{FSCRIPT=FS_BASE;FSTEP=0;$("#fscript").value=FSCRIPT;toast("Baseline script restored (12 commands)")};
+  $("#fsample").onclick=()=>{FSCRIPT=FS_SAMPLE;FSTEP=0;$("#fscript").value=FSCRIPT;toast("Sample script loaded (20 commands)")};
+  banner(); engineStatus().then(banner);
+  if(FIL) drawFile();
+}
+function fileStep(){ FSTEP++; return fileRun(FSTEP); }
+function fileReset(){ FIL=null; FSTEP=0; const o=$("#fout"); if(o) o.innerHTML=""; setClock(0); setState("Ready"); toast("Reset: file system cleared, script kept"); }
+
+/* ---------- Integration ---------- */
+function parseInt3(){
+  const errs=[], S=INTSTATE;
+  const traces={}; S.traces.split("\n").forEach((ln,i)=>{ const t=ln.trim(); if(!t||t.startsWith("#")) return; const m=t.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+    if(!m){ errs.push(`Trace line ${i+1}: use  PID: address address ...`); return; } traces[m[1]]=m[2].trim().split(/\s+/).filter(Boolean).join("\n"); });
+  const principals={}; S.users.split("\n").forEach((ln,i)=>{ const t=ln.trim(); if(!t||t.startsWith("#")) return; const m=t.match(/^([A-Za-z0-9_-]+)\s*=\s*([A-Za-z0-9_-]+)$/);
+    if(!m){ errs.push(`User line ${i+1}: use  PID=user`); return; } principals[m[1]]=m[2]; });
+  const requests=[]; S.reqs.split("\n").forEach((ln,i)=>{ const t=ln.trim(); if(!t||t.startsWith("#")) return; const m=t.match(/^(\S+)\s+(\S+)\s+(\S+)\s*(.*)$/);
+    if(!m){ errs.push(`Request line ${i+1}: use  PID time_ms command arguments`); return; }
+    const [,pid,at,cmd,rest]=m, at_ms=parseFloat(at); if(!isFinite(at_ms)||at_ms<0){ errs.push(`Request line ${i+1}: time must be a number of ms, 0 or more`); return; }
+    let args=[]; if(cmd==="write"||cmd==="append"){ const mm=rest.match(/^(\S+)\s*(.*)$/); args=mm?[mm[1],mm[2].trim().replace(/^"|"$/g,"")]:[]; } else if(rest.trim()) args=[rest.trim()];
+    requests.push({pid,cmd,args,at_ms}); });
+  const flt=msToTicks(parseFloat(S.lat),"Fault time",errs);
+  return {errs, body:{csv:S.procs,policy:S.policy,q:4,cs:0,aging:0,seed:0,preemptive:S.policy==="srtf",
+    memory:{traces,page_size:4096,frames:3,policy:"lru",hit_ticks:1,fault_ticks:flt,interval_ticks:10},
+    files:{requests,principals,setup:[{path:"/",mode:"775",group:"staff"}]}}};
+}
+async function intRun(){
+  const out=$("#iout"); const {errs,body}=parseInt3(); if(errs.length){ showErrs(out,errs); return false; }
+  await engineStatus(); if(!(ENGINE&&ENGINE.engine)){ out.innerHTML=notConnected(); return false; }
+  const r=await post("/api/integration/run",body); if(!r.ok){ showErrs(out,r.j.errors||["Request failed"]); return false; }
+  INT=r.j; setClock(INT.events.length?INT.events[INT.events.length-1].time/10:0); setState("Finished"); drawInt(); return true;
+}
+function intChart(){
+  const p=INT.process.snapshot, pids=Object.keys(p.per_process).sort(), lastBlock=Math.max(0,...INT.blocked.map(b=>b.end));
+  const T=Math.max(p.makespan,lastBlock)/10, L=44, W=760, R=12, lane=40, H=24+pids.length*lane+26, x=ms=>L+ms/T*(W-L-R);
+  const step=T<=20?2:T<=60?5:10; let svg=`<svg role="img" aria-label="Process lanes: when each process ran and when it was blocked by page faults or file requests" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:#fff;border:1px solid var(--line);border-radius:6px"><title>Running and blocked time per process</title>
+   <defs><pattern id="hm" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fff"/><rect width="3" height="6" fill="#c76a00"/></pattern>
+   <pattern id="hf" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)"><rect width="6" height="6" fill="#fff"/><rect width="3" height="6" fill="#2f6fdb"/></pattern></defs>`;
+  for(let t=0;t<=T+1e-9;t+=step) svg+=`<line x1="${x(t)}" x2="${x(t)}" y1="16" y2="${H-24}" stroke="#e5e8ee"/><text x="${x(t)}" y="${H-8}" font-size="11" text-anchor="middle" fill="#5d6676">${t}</text>`;
+  svg+=`<text x="${W-R}" y="${H-8}" font-size="11" text-anchor="end" fill="#5d6676">ms</text>`;
+  pids.forEach((pid,i)=>{ const y=22+i*lane; svg+=`<text x="4" y="${y+11}" font-size="12" font-weight="700">${esc(pid)}</text><text x="4" y="${y+23}" font-size="9" fill="#5d6676">run</text>`;
+    p.gantt.filter(g=>g.pid===pid).forEach(g=>{ svg+=`<rect x="${x(g.start/10)}" y="${y}" width="${Math.max(1,x(g.end/10)-x(g.start/10))}" height="12" fill="#1d2330"><title>${esc(pid)} running ${g.start/10}-${g.end/10} ms</title></rect>`; });
+    INT.blocked.filter(b=>b.pid===pid).forEach(b=>{ const mem=b.source==="memory"; svg+=`<rect x="${x(b.start/10)}" y="${y+(mem?14:25)}" width="${Math.max(1.5,x(b.end/10)-x(b.start/10))}" height="9" fill="url(#${mem?"hm":"hf"})" stroke="${mem?"#c76a00":"#2f6fdb"}"><title>${esc(pid)} blocked (${b.reason}) ${b.start/10}-${b.end/10} ms</title></rect>`; }); });
+  return svg+`</svg><div class="legend"><span class="lg"><i style="background:#1d2330"></i>running on the CPU</span><span class="lg"><i style="background:repeating-linear-gradient(45deg,#fff,#fff 2px,#c76a00 2px,#c76a00 4px);border:1px solid #c76a00"></i>blocked: page fault</span><span class="lg"><i style="background:repeating-linear-gradient(-45deg,#fff,#fff 2px,#2f6fdb 2px,#2f6fdb 4px);border:1px solid #2f6fdb"></i>blocked: file request</span></div>`;
+}
+function drawInt(){
+  const el=$("#iout"); if(!el||!INT) return;
+  const per=INT.per_process;
+  let h=`<h3>Result</h3>`+INT.warnings.map(w=>`<div class="note">${esc(w)}</div>`).join("")+`<div class="note"><b>Not modeled yet:</b> ${esc(INT.limitation)}</div>`;
+  h+=`<table><caption class="sr">Per-process summary across the three managers</caption><tr><th>PID</th><th>Memory refs</th><th>Page faults</th><th>File ok</th><th>File error</th><th>File denied</th><th>Blocked (ms)</th></tr>`+
+    Object.entries(per).map(([pid,v])=>`<tr><td>${esc(pid)}</td><td>${v.references}</td><td>${v.faults}</td><td>${v.file_ok}</td><td>${v.file_failed}</td><td>${v.file_denied?`<b>${v.file_denied}</b>`:0}</td><td>${(v.blocked_ticks/10).toFixed(1)}</td></tr>`).join("")+`</table>`;
+  h+=`<h3>CPU time and blocked time per process</h3>${intChart()}`;
+  h+=`<details><summary>Text version: blocked intervals</summary><table><tr><th>PID</th><th>Blocked from (ms)</th><th>Until (ms)</th><th>Why</th></tr>${INT.blocked.map(b=>`<tr><td>${esc(b.pid)}</td><td>${b.start/10}</td><td>${b.end/10}</td><td>${esc(b.reason)}</td></tr>`).join("")||'<tr><td colspan="4">No blocking</td></tr>'}</table></details>`;
+  const mgrs=[...new Set(INT.events.map(e=>e.manager))];
+  h+=`<h3>Correlated event log</h3><div class="row" style="margin-bottom:8px"><div><label for="imgr">Manager</label><select id="imgr"><option value="">All</option>${mgrs.map(g=>`<option>${g}</option>`).join("")}</select></div><div><label for="ipid">Process</label><select id="ipid"><option value="">All</option>${Object.keys(per).map(g=>`<option>${esc(g)}</option>`).join("")}</select></div></div>
+   <div style="max-height:420px;overflow:auto"><table id="ievtab"><tr><th>seq</th><th>t (ms)</th><th>Manager</th><th>Event</th><th>Entity</th><th>State change</th><th>Outcome</th><th>Message</th></tr>`+
+   INT.events.map(e=>`<tr data-m="${e.manager}" data-p="${esc(e.entity_id)}"><td>${e.seq}</td><td>${(e.time/10).toFixed(1)}</td><td>${e.manager}</td><td>${e.event_type}</td><td>${esc(e.entity_id)}</td><td>${e.prev_state??""}${e.new_state?" to "+e.new_state:""}</td><td>${e.outcome==="denied"?"<b>denied</b>":e.outcome}</td><td>${esc(e.message)}</td></tr>`).join("")+`</table></div>`;
+  h+=`<div class="row" style="margin-top:12px"><button class="btn ghost" id="iexev">Export correlated events (CSV)</button><button class="btn ghost" id="iexjson">Export run (JSON)</button></div>`;
+  el.innerHTML=h;
+  const f=()=>{ const g=$("#imgr").value, p=$("#ipid").value; document.querySelectorAll("#ievtab tr[data-m]").forEach(r=>{ r.style.display=(!g||r.dataset.m===g)&&(!p||r.dataset.p===p)?"":"none"; }); };
+  $("#imgr").onchange=f; $("#ipid").onchange=f;
+  $("#iexev").onclick=()=>dl("integration_events.csv",eventsCsv(INT.events));
+  $("#iexjson").onclick=()=>dl("integration_run.json",JSON.stringify(INT,null,2),"application/json");
+}
+function wireIntegration(){
+  const S=INTSTATE, map={ipol:"policy",iprocs:"procs",itraces:"traces",iusers:"users",ireqs:"reqs",ilat:"lat"};
+  for(const [id,k] of Object.entries(map)){ $("#"+id).value=S[k]; $("#"+id).oninput=$("#"+id).onchange=()=>{S[k]=$("#"+id).value}; }
+  $("#irun").onclick=()=>intRun();
+  $("#ireset").onclick=()=>{ Object.assign(S,{procs:INT_PROCS,traces:INT_TRACES,users:INT_USERS,reqs:INT_REQS,policy:"fcfs",lat:"1.0"}); INT=null; show("integration"); toast("Demo inputs restored"); };
+  banner(); engineStatus().then(banner);
+  if(INT) drawInt();
+}
+function pageCtl(act){
+  if(act==="Run"){ if(CURPAGE==="memory") return memRun("run"); if(CURPAGE==="file"){ FSTEP=0; return fileRun(0); } return intRun(); }
+  if(act==="Step"){ if(CURPAGE==="file") return fileStep(); toast("Step runs one command on the File page. Memory and Integration run to the end."); return; }
+  if(act==="Reset"){ if(CURPAGE==="file") return fileReset(); if(CURPAGE==="memory"){ MEM=null; MEMCMP=null; const o=$("#mout"); if(o) o.innerHTML=""; } else { INT=null; const o=$("#iout"); if(o) o.innerHTML=""; } setClock(0); setState("Ready"); toast("Reset: results cleared, inputs kept"); return; }
+  if(act==="Pause"){ toast("Nothing is running: this page computes the whole run at once."); return; }
+  toast("Batch runs are planned for a later milestone.");
+}
+
+/* ---------- Testing center: memory, file and integration checks ---------- */
+const MEMBODY={page_size:4096,frames:3,hit_ticks:1,fault_ticks:50};
+async function m3Rows(prog){
+  const rows=[], add=(name,suite,ok,exp,act,diag)=>rows.push([name,suite,ok,exp,act,diag]);
+  const E=EXP.memory;
+  for(const pol of ["fifo","lru"]){ const k=pol.toUpperCase(); prog.textContent="Running memory "+k+"..."; const r=await post("/api/memory/run",{...MEMBODY,trace:TRACE_BASE,policy:pol}); const e=E[k];
+    const got=(r.j.snapshot?r.j.snapshot.results.join(""):""), want=e.results.join(""); const ok=r.ok&&got===want&&mv(r.j.metrics,"faults")===e.faults&&mv(r.j.metrics,"evictions")===e.evictions;
+    add(`T-MEM-0${pol==="fifo"?2:3} ${k} on the baseline trace`,"Unit: memory",ok,`${want}; ${e.faults} faults, ${e.evictions} evictions`,r.ok?`${got}; ${mv(r.j.metrics,"faults")} faults, ${mv(r.j.metrics,"evictions")} evictions`:(r.j.errors||[]).join(" | "),ok?"matches the hand-calculated values":"differs from the hand-calculated values"); }
+  prog.textContent="Running memory comparison..."; const c=await post("/api/memory/compare",{...MEMBODY,trace:TRACE_LOC,policy:"fifo"});
+  const okc=c.ok&&mv(c.j.runs.fifo.metrics,"faults")===12&&mv(c.j.runs.lru.metrics,"faults")===8;
+  add("T-MEM-04 Locality trace: LRU beats FIFO","Unit: memory",okc,"FIFO 12 faults, LRU 8 faults (worked by hand)",c.ok?`FIFO ${mv(c.j.runs.fifo.metrics,"faults")}, LRU ${mv(c.j.runs.lru.metrics,"faults")}`:(c.j.errors||[]).join(" | "),okc?"both policies ran on the identical trace":"differs from the hand-worked values");
+  prog.textContent="Running file baseline..."; const fb=await post("/api/file/run",{script:FS_BASE}); const steps=EXP.file.steps;
+  const log=fb.ok?fb.j.snapshot.log:[]; const okf=fb.ok&&log.length===steps.length&&log.every((h,i)=>h.ok===steps[i].ok&&(h.ok?h.output:h.error)===(steps[i].ok?steps[i].output:steps[i].error));
+  add("T-FILE-02 Baseline 12-command script","Unit: file",okf,`${steps.length} steps; 9 ok, 3 errors; tree empty at the end`,fb.ok?`${log.length} steps; ${mv(fb.j.metrics,"succeeded")} ok, ${mv(fb.j.metrics,"failed")} errors; ${fb.j.snapshot.tree.children.length} items left`:(fb.j.errors||[]).join(" | "),okf?"every step matches expected_results/file_baseline.json":"a step differs from the expected result");
+  const fs=await post("/api/file/run",{script:FS_SAMPLE}); const m=fs.ok?fs.j.metrics:null;
+  const okg=fs.ok&&mv(m,"operations")===20&&mv(m,"succeeded")===15&&mv(m,"failed")===5&&mv(m,"bytes_written")===15&&mv(m,"bytes_read")===14&&mv(m,"storage_used")===0;
+  add("T-FILE-03 20-command script with 5 safe errors","Unit: file",okg,"20 commands; 15 ok, 5 errors; 15 B written, 14 B read; storage 0 B",m?`${mv(m,"operations")} commands; ${mv(m,"succeeded")} ok, ${mv(m,"failed")} errors; ${mv(m,"bytes_written")} B written, ${mv(m,"bytes_read")} B read; storage ${mv(m,"storage_used")} B`:(fs.j.errors||[]).join(" | "),okg?"matches the hand-worked values":"differs from the hand-worked values");
+  prog.textContent="Running integration..."; const ib=parseIntDefaults(); const ir=await post("/api/integration/run",ib); const pp=ir.ok?ir.j.per_process:null;
+  const oki=ir.ok&&pp.P1.faults===6&&pp.P2.faults===3&&ir.j.file.metrics.denied.value===3&&ir.j.file.metrics.succeeded.value===5;
+  add("T-INT-02 Process refs + authorized file requests","Integration",oki,"P1 6 faults, P2 3 faults; file requests: 5 ok, 3 denied",ir.ok?`P1 ${pp.P1.faults} faults, P2 ${pp.P2.faults} faults; ${ir.j.file.metrics.succeeded.value} ok, ${ir.j.file.metrics.denied.value} denied`:(ir.j.errors||[]).join(" | "),oki?"blocked then ready; denied requests logged":"differs from the hand-worked values");
+  const bad=[["T-INV-04 Memory: zero frames","/api/memory/run",{...MEMBODY,trace:TRACE_BASE,frames:0},"frames must be"],["T-INV-05 Memory: bad address","/api/memory/run",{...MEMBODY,trace:"0x10\nzzz\n"},"not a decimal or hex address"],
+    ["T-INV-06 File: unknown command","/api/file/run",{script:"format /\n"},"unknown command"],["T-INV-07 Integration: unknown process","/api/integration/run",{...parseIntDefaults(),memory:{traces:{P9:"0x0"}},files:{}},"not in the workload"]];
+  for(const [name,path,b,frag] of bad){ prog.textContent="Running "+name+"..."; const r=await post(path,b); const msg=(r.j.errors||[]).join(" | "); const ok=r.status===422&&msg.includes(frag);
+    add(name,"Invalid input",ok,`rejected (422) with a message containing "${frag}"`,`${r.status}: ${msg||"accepted"}`,ok?"rejected, nothing changed":"not rejected as expected"); }
+  return rows;
+}
+function parseIntDefaults(){ const keep={...INTSTATE}; Object.assign(INTSTATE,{procs:INT_PROCS,traces:INT_TRACES,users:INT_USERS,reqs:INT_REQS,policy:"fcfs",lat:"1.0"}); const r=parseInt3().body; Object.assign(INTSTATE,keep); return r; }
+
+const procCsv=()=>toCsv(["pid","start_ms","completion_ms","turnaround_ms","waiting_ms","response_ms","dispatches"],Object.entries(RUN.res.per_process).map(([p,m])=>[p,m.start,m.completion,m.turnaround,m.waiting,m.response,m.dispatches]));
+const EXPORTS=[
+ ["Process results (CSV)",()=>RUN&&RUN.source==="engine"?"From the last Process run":"Run the Process page first",()=>RUN&&RUN.source==="engine",()=>dl("process_results.csv",procCsv())],
+ ["Process event log (CSV)",()=>RUN&&RUN.source==="engine"?`${RUN.events.length} events`:"Run the Process page first",()=>RUN&&RUN.source==="engine",()=>dl("process_events.csv",eventsCsv(RUN.events))],
+ ["Memory results (CSV)",()=>MEM?`${MEM.snapshot.references.length} references (${MEM.snapshot.policy.toUpperCase()})`:"Run the Memory page first",()=>!!MEM,()=>dl("memory_results.csv",memRefsCsv())],
+ ["Memory FIFO vs LRU (CSV)",()=>MEMCMP?"Both policies, identical trace":"Press Compare on the Memory page first",()=>!!MEMCMP,()=>dl("memory_comparison.csv",memCompareCsv())],
+ ["Memory event log (CSV)",()=>MEM?`${MEM.events.length} events`:"Run the Memory page first",()=>!!MEM,()=>dl("memory_events.csv",eventsCsv(MEM.events))],
+ ["File operation log (CSV)",()=>FIL?`${FIL.snapshot.log.length} operations`:"Run the File page first",()=>!!FIL,()=>dl("file_operations.csv",FIL.csv)],
+ ["File event log (CSV)",()=>FIL?`${FIL.events.length} events`:"Run the File page first",()=>!!FIL,()=>dl("file_events.csv",eventsCsv(FIL.events))],
+ ["Integration events (CSV)",()=>INT?`${INT.events.length} correlated events`:"Run the Integration demo first",()=>!!INT,()=>dl("integration_events.csv",eventsCsv(INT.events))],
+];
 const PAGES = {
 overview: () => `<h2>Overview</h2><p class="sub">Health of each manager, current run and warnings</p>
  <div class="grid">${[["Process","Copernic","M2"],["Memory","Copernic","M3"],["File","Liberty","M3"],["Security","Liberty","M4"],["Device","Arian","M4"],["Network","Arian","M4"],["Parallel","Rasheed","M4"]].map(m=>
- `<div class="card"><h3>${m[0]} manager</h3><span class="badge b-todo" ${m[0]==="Process"?'id="ov-proc"':""}>${m[0]==="Process"?"Checking":"Not built"}</span><p class="sub" style="margin:6px 0 0">Owner ${m[1]} · due ${m[2]}</p></div>`).join("")}</div>
- <div class="row" style="margin-top:14px"><div class="card" style="flex:1"><h3>Run summary</h3>Scenario <b>baseline-01</b> · seed 42 · 0 events · 0 warnings</div>
- <div class="card" style="flex:1"><h3>Warnings</h3><span class="badge b-warn">! 1 warning</span> Only the Process page is wired to an engine. Other managers are not built yet.</div></div>`,
+ `<div class="card"><h3>${m[0]} manager</h3><span class="badge b-todo" ${["Process","Memory","File"].includes(m[0])?`id="ov-${m[0].toLowerCase()}"`:""}>${["Process","Memory","File"].includes(m[0])?"Checking":"Not built"}</span><p class="sub" style="margin:6px 0 0">Owner ${m[1]} · due ${m[2]}</p></div>`).join("")}</div>
+ <div class="row" style="margin-top:14px"><div class="card" style="flex:1"><h3>Run summary</h3>Scenario <b>baseline-01</b> · seed 42 · Milestone 3 build</div>
+ <div class="card" style="flex:1"><h3>Warnings</h3><span class="badge b-todo">Status</span> Process, Memory and File are wired to the engine. Security, Device, Network and Parallel are Milestone 4.</div></div>`,
 process: () => `<h2>Process manager</h2><p class="sub">Owner: Copernic · CPU scheduling (spec 4.1)</p>
  <div id="engbanner" class="note" role="status"></div>
  <div class="row">
@@ -293,14 +569,39 @@ process: () => `<h2>Process manager</h2><p class="sub">Owner: Copernic · CPU sc
   <div class="card" style="max-width:340px"><h3>How to run</h3><p class="sub" style="margin:0">Use the toolbar at the top. <b>Run</b> plays the simulation event by event at the chosen speed, <b>Pause</b> holds it, <b>Step</b> advances one event, <b>Reset</b> clears the run. The same seed and inputs give the same result.</p></div>
  </div>
  <div id="pout"></div>`,
-memory: () => `<h2>Memory manager</h2><p class="sub">Owner: Copernic · Paging, FIFO vs LRU (spec 4.2)</p>
- ${protoNote("values come from <code>expected_results/memory_baseline.json</code> (page size 4096 B, 3 frames).")}
- <div class="row"><div><label for="mp">Policy</label><select id="mp"><option>FIFO</option><option>LRU</option></select></div><div><label>&nbsp;</label><button class="btn" id="mrun">Run</button></div></div><div id="mout"></div>`,
-file: () => { const e=EXP.file; return `<h2>File manager</h2><p class="sub">Owner: Liberty · In-memory hierarchical file system (spec 4.3)</p>
- ${protoNote("operation log from <code>expected_results/file_baseline.json</code>.")}
- <div class="row"><div class="card" style="min-width:220px"><h3>File tree (after step 6)</h3><div class="tree">/<br>└── docs/<br>&nbsp;&nbsp;&nbsp;&nbsp;└── notes.txt &nbsp;(8 B)</div></div>
- <div class="card"><h3>Metadata: /docs/notes.txt</h3>owner: alice · mode rw-r----- · size 8 B · open handles 0</div></div>
- <h3>Operation log</h3><table><tr><th>#</th><th>Command</th><th>Result</th><th>Output / error</th></tr>${e.steps.map((s,i)=>`<tr><td>${i+1}</td><td><code>${s.cmd}</code></td><td>${s.ok?'<span class="badge b-ok">✓ ok</span>':'<span class="badge b-warn">✗ error</span>'}</td><td>${s.ok?(s.output||""):s.error}</td></tr>`).join("")}</table>`},
+memory: () => `<h2>Memory manager</h2><p class="sub">Owner: Copernic · Paging with FIFO and LRU (spec 4.2) · every number comes from the engine</p>
+ <div id="engbanner" class="note" role="status"></div>
+ <div class="row">
+  <div><label for="mp">Policy</label><select id="mp"><option>FIFO</option><option>LRU</option></select></div>
+  <div><label for="mps">Page size (bytes)</label><input id="mps" type="number" value="4096" min="1" style="width:100px"></div>
+  <div><label for="mfr">Frames</label><input id="mfr" type="number" value="3" min="1" style="width:70px"></div>
+  <div><label for="mhit">Hit time (ms)</label><input id="mhit" type="number" value="0.1" step="0.1" min="0" style="width:80px"></div>
+  <div><label for="mflt">Fault time (ms)</label><input id="mflt" type="number" value="5" step="0.1" min="0" style="width:80px"></div>
+ </div>
+ <div style="margin-top:10px"><label for="mtrace">Address trace (hex 0x... or decimal, one per line, # starts a comment)</label><textarea id="mtrace" class="mono" rows="8"></textarea>
+ <div class="row" style="margin-top:6px"><button class="btn" id="mrun">Run selected policy</button><button class="btn" id="mcmp">Compare FIFO vs LRU</button><button class="btn ghost" id="mbase">Baseline trace</button><button class="btn ghost" id="mloc">Locality trace</button></div></div>
+ <div id="mout" style="margin-top:12px"></div>`,
+file: () => `<h2>File manager</h2><p class="sub">Owner: Liberty · In-memory hierarchical file system (spec 4.3) · no host file is ever touched</p>
+ <div id="engbanner" class="note" role="status"></div>
+ <div class="row"><div><label for="fuser">Run as user</label><select id="fuser"><option>admin</option><option>alice</option><option>bob</option><option>guest</option></select></div>
+  <div><label for="froot">Root directory permissions</label><select id="froot"><option value="755">755: only admin can create at /</option><option value="775">775: group staff can create at /</option></select></div></div>
+ <div style="margin-top:10px"><label for="fscript">Command script (mkdir, ls, mkfile, write, append, cat, rm, rmdir; # starts a comment line)</label><textarea id="fscript" class="mono" rows="10"></textarea>
+ <div class="row" style="margin-top:6px"><button class="btn" id="frun">Run script</button><button class="btn" id="fstep">Step one command</button><button class="btn ghost" id="freset">Reset</button><button class="btn ghost" id="fbase">Baseline script (12)</button><button class="btn ghost" id="fsample">Sample script (20)</button></div></div>
+ <div id="fout" style="margin-top:12px"></div>`,
+integration: () => `<h2>Integration demo</h2><p class="sub">Process-generated memory references and authorized process file requests (Milestone 3 initial integration)</p>
+ <div id="engbanner" class="note" role="status"></div>
+ <div class="note">Processes run on the CPU first (Process Manager). While a process is on the CPU it issues memory references from its trace, and a page fault blocks it until the page is loaded. File requests run as the user mapped to the process and are allowed or denied by owner, group and other permissions. The note under the results says what is not modeled yet.</div>
+ <div class="row"><div><label for="ipol">CPU policy</label><select id="ipol"><option value="fcfs">FCFS</option><option value="sjf">SJF</option><option value="srtf">SRTF</option><option value="rr">Round-Robin (q = 4)</option></select></div>
+  <div><label for="ilat">Page-fault time (ms)</label><input id="ilat" type="number" step="0.1" min="0" value="1.0" style="width:90px"></div></div>
+ <div class="row" style="margin-top:10px">
+  <div style="flex:1;min-width:260px"><label for="iprocs">Workload (CSV: pid,arrival,burst,priority)</label><textarea id="iprocs" class="mono" rows="6"></textarea></div>
+  <div style="flex:1;min-width:260px"><label for="itraces">Memory traces (one line per process: PID: addresses)</label><textarea id="itraces" class="mono" rows="6"></textarea>
+   <p class="sub" style="margin:2px 0 0">3 frames, 4096-byte pages, LRU. A process issues one reference per ms while it is on the CPU.</p></div></div>
+ <div class="row" style="margin-top:10px"><div style="flex:1;min-width:240px"><label for="iusers">User each process runs as (PID=user)</label><textarea id="iusers" class="mono" rows="5"></textarea>
+   <p class="sub" style="margin:2px 0 0">alice and bob are group staff, guest is not, admin bypasses permissions. Root is 775.</p></div>
+  <div style="flex:2;min-width:300px"><label for="ireqs">File requests (PID time_ms command arguments)</label><textarea id="ireqs" class="mono" rows="5"></textarea></div></div>
+ <div class="row" style="margin-top:8px"><button class="btn" id="irun">Run integration</button><button class="btn ghost" id="ireset">Restore demo inputs</button></div>
+ <div id="iout" style="margin-top:12px"></div>`,
 security: () => placeholder("Security manager","Liberty","Milestone 4",[["Session","Login/logout with demo users (no real passwords)"],["Permission matrix","Users × resources, rwx per cell, text labels"],["Audit log","Append-only, filterable by severity and outcome"],["Alerts","Repeated failed logins, forbidden access"],["Severity chart","Events by info / warning / critical"]]),
 device: () => placeholder("Device manager","Arian","Milestone 4",[["Devices","Disk, printer, keyboard with status: available / busy / offline / error"],["Queues","Per-device request queue, FCFS"],["Disk policy","FCFS, SSTF, SCAN/C-SCAN"],["Disk-head plot","Cylinder vs time"],["Request timeline","Arrival, start, completion, outcome"]]),
 network: () => placeholder("Network manager","Arian","Milestone 4",[["Topology","Nodes, links, status and cost; route highlighted"],["Queues","FIFO vs priority / WRR"],["Packet timeline","Created, sent, delivered, dropped"],["Link utilization","Per link over time"],["Drop reasons","Buffer full, TTL expired, unreachable"]]),
@@ -308,22 +609,23 @@ parallel: () => placeholder("Parallel computing","Rasheed (backup Copernic)","Mi
 scenario: () => `<h2>Scenario builder</h2><p class="sub">Create and edit every input type; validation runs before saving</p>
  <div class="tabs" role="tablist">${["Processes","Address trace","File script","Users & policies","Device requests","Packets & links","Failure events"].map((t,i)=>`<button role="tab" aria-selected="${i===0}" data-tab="${i}">${t}</button>`).join("")}</div>
  <div class="card" style="border-radius:0 8px 8px 8px"><div id="tabbody"></div></div>`,
-testing: () => `<h2>Testing center</h2><p class="sub">Runs the engine on the baseline workload and on bad inputs, then compares with the expected values</p>
- <div class="note">Expected values are the hand-calculated results in <code>expected_results/process_baseline.json</code>. The full automated suite (<code>pytest -q</code>) runs from the terminal.</div>
- <div class="row" style="margin-bottom:10px"><button class="btn" id="tcrun">Run process checks</button><span id="tcprog" role="status" class="sub" style="margin:6px 0 0 8px"></span></div>
+testing: () => `<h2>Testing center</h2><p class="sub">Runs the engine on the baseline workload, the memory traces, the file scripts, the integration demo and on bad inputs, then compares with the expected values</p>
+ <div class="note">Expected values are the hand-calculated results in <code>expected_results/*.json</code> and the hand-worked cases in the unit tests. The full automated suite (<code>pytest -q</code>) runs from the terminal.</div>
+ <div class="row" style="margin-bottom:10px"><button class="btn" id="tcrun">Run engine checks</button><span id="tcprog" role="status" class="sub" style="margin:6px 0 0 8px"></span></div>
  <div id="tcout"></div>`,
 compare: () => { const rows=Object.entries(ALGS).map(([k,v])=>[v,EXP.process.algorithms[k].averages]); const mx=Math.max(...rows.map(r=>r[1].waiting));
  return `<h2>Comparison center</h2><p class="sub">Same input, several policies, side by side</p>${protoNote("expected values for the baseline workload, cs = 0.")}
  <table><tr><th>Policy</th><th>Avg waiting (ms)</th><th>Avg turnaround (ms)</th><th>Avg response (ms)</th><th style="width:35%">Avg waiting (bar)</th></tr>
- ${rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1].waiting.toFixed(2)}</td><td>${r[1].turnaround.toFixed(2)}</td><td>${r[1].response.toFixed(2)}</td><td><div class="bar" style="width:${r[1].waiting/mx*100}%" aria-hidden="true"></div></td></tr>`).join("")}</table>`},
+ ${rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1].waiting.toFixed(2)}</td><td>${r[1].turnaround.toFixed(2)}</td><td>${r[1].response.toFixed(2)}</td><td><div class="bar" style="width:${r[1].waiting/mx*100}%" aria-hidden="true"></div></td></tr>`).join("")}</table><h3 style="margin-top:18px">Memory: FIFO vs LRU</h3>${memCompareHtml()}`},
 events: () => { const E=RUN?RUN.events:[]; return `<h2>Event explorer</h2><p class="sub">Events from the last Process run</p>
  ${E.length?"":'<div class="note">No events yet. Run a simulation from the Process page (engine required).</div>'}
  <div class="row" style="margin-bottom:10px"><div><label for="evq">Search</label><input id="evq" type="text" placeholder="entity, event, message"></div>
  <div><label for="evt">Event type</label><select id="evt"><option value="">All</option>${[...new Set(E.map(e=>e.event_type))].map(t=>`<option>${t}</option>`).join("")}</select></div></div>
  <div style="max-height:480px;overflow:auto"><table id="evtab"><tr><th>seq</th><th>t (ms)</th><th>Event</th><th>Entity</th><th>State change</th><th>Outcome</th><th>Severity</th><th>Correlation</th><th>Message</th></tr>
  ${E.map(e=>`<tr data-t="${e.event_type}" data-s="${(e.entity_id+" "+e.event_type+" "+e.message).toLowerCase()}"><td>${e.seq}</td><td>${(e.time/10).toFixed(1)}</td><td>${e.event_type}</td><td>${e.entity_id}</td><td>${e.prev_state??""} to ${e.new_state??""}</td><td>${e.outcome}</td><td>${e.severity}</td><td>${e.correlation_id}</td><td>${e.message}</td></tr>`).join("")}</table></div>`},
-export: () => `<h2>Export</h2><p class="sub">Save configuration, event log, per-manager CSV, charts and summary (no host data)</p>
- <div class="grid">${["Configuration (JSON)","Event log (CSV / JSON)","Process metrics (CSV)","Memory results (CSV)","File log (CSV)","Charts (SVG/PNG)","Summary report (Markdown)"].map(x=>`<div class="card"><h3>${x}</h3><button class="btn ghost" onclick="toast('Export: Milestone 2+')">Export</button></div>`).join("")}</div>`
+export: () => `<h2>Export</h2><p class="sub">Save results and logs as CSV or JSON. Files are generated in your browser from the last run on each page; nothing is sent anywhere.</p>
+ <div class="grid">${EXPORTS.map((x,i)=>`<div class="card"><h3>${x[0]}</h3><p class="sub" style="margin:0 0 8px">${x[1]()}</p><button class="btn ghost" data-ex="${i}" ${x[2]()?"":"disabled"}>Export</button></div>`).join("")}</div>
+ <div class="note" style="margin-top:12px">Charts and the summary report are not exported from here. The charts are on the pages themselves with a text version beside each one.</div>`
 };
 const TABS=[
  ()=>`<table><tr><th>PID</th><th>Arrival</th><th>Burst</th><th>Priority</th></tr>${PROC.map(r=>`<tr>${r.map(c=>`<td contenteditable="true">${c}</td>`).join("")}</tr>`).join("")}</table>
@@ -335,17 +637,17 @@ const TABS=[
  ()=>`<p>Nodes, links (bandwidth, delay, cost), packets. <span class="badge b-todo">Milestone 4</span></p>`,
  ()=>`<p>At time t: device offline / link down / recover. <span class="badge b-todo">Milestone 4</span></p>`];
 function show(page){
+  CURPAGE=page;
   document.querySelectorAll("nav button").forEach(b=>{ if(b.dataset.page===page) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current"); });
   $("#main").innerHTML=PAGES[page](); $("#main").focus();
   if(page==="process"){ wireProcess(); }
-  if(page==="overview"){ engineStatus().then(()=>{const e=$("#ov-proc"); if(e) e.textContent=ENGINE&&ENGINE.engine?"Engine connected":"Engine not connected";}); }
+  if(page==="overview"){ engineStatus().then(()=>{ for(const k of ["process","memory","file"]){ const e=$("#ov-"+k); if(e) e.textContent=ENGINE&&ENGINE.engine?"Engine connected":"Engine not connected"; } }); }
   if(page==="events"){ const f=()=>{const q=($("#evq").value||"").toLowerCase(),t=$("#evt").value; document.querySelectorAll("#evtab tr[data-s]").forEach(r=>{r.style.display=(!q||r.dataset.s.includes(q))&&(!t||r.dataset.t===t)?"":"none"})}; $("#evq").oninput=f; $("#evt").onchange=f; }
   if(page==="testing"){ $("#tcrun").onclick=runChecks; }
-  if(page==="memory"){ $("#mrun").onclick=()=>{const m=EXP.memory, r=m[$("#mp").value]; const fr=[];let rows="";
-     m.pages.forEach((p,i)=>{ if(r.results[i]==="F"){ if(r.evicted[i]!==null) fr.splice(fr.indexOf(r.evicted[i]),1,p); else fr.push(p);} 
-       rows+=`<tr><td>${i+1}</td><td>0x${[0x0040,0x10A0,0x0044,0x20B0,0x3010,0x0048,0x10A4,0x4000,0x0050,0x20B4][i].toString(16).toUpperCase().padStart(4,"0")}</td><td>${p}</td>${[0,1,2].map(j=>`<td>${fr[j]??""}</td>`).join("")}<td class="${r.results[i]==="H"?"h":"f"}">${r.results[i]==="H"?"Hit":"Fault"}</td><td>${r.evicted[i]??""}</td></tr>`;});
-     $("#mout").innerHTML=`<table class="frames" style="margin-top:12px"><tr><th>#</th><th>Address</th><th>Page</th><th>Frame 0</th><th>Frame 1</th><th>Frame 2</th><th>Result</th><th>Evicted</th></tr>${rows}</table>
-     <p class="sub">${r.hits} hits · ${r.faults} faults · ${r.evictions} evictions · fault rate ${(r.fault_rate*100).toFixed(0)}% · avg access ${r.avg_access_ms.toFixed(2)} ms</p>`;}; $("#mrun").click(); }
+  if(page==="memory"){ wireMemory(); }
+  if(page==="file"){ wireFile(); }
+  if(page==="integration"){ wireIntegration(); }
+  if(page==="export"){ document.querySelectorAll("[data-ex]").forEach(b=>b.onclick=()=>EXPORTS[+b.dataset.ex][3]()); }
   if(page==="scenario"){ const sel=i=>{document.querySelectorAll("[role=tab]").forEach(t=>t.setAttribute("aria-selected",t.dataset.tab==i)); $("#tabbody").innerHTML=TABS[i]();
      if(i==0){ $("#addrow").onclick=()=>{$("#tabbody table").insertAdjacentHTML("beforeend",`<tr><td contenteditable>P5</td><td contenteditable>4</td><td contenteditable>-2</td><td contenteditable>1</td></tr>`)};
        $("#validate").onclick=()=>{const errs=[],seen=new Set();[...$("#tabbody table").rows].slice(1).forEach((tr,i)=>{const c=[...tr.cells].map(x=>x.textContent.trim());

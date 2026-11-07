@@ -30,7 +30,7 @@ def call(base, path, body=None, raw=None):
 
 
 def test_status_reports_engine(base):
-    assert call(base, "/api/status") == (200, {"engine": True, "detail": "Process Manager loaded"})
+    assert call(base, "/api/status") == (200, {"engine": True, "detail": "Process, Memory and File managers loaded"})
 
 
 def test_run_baseline_srtf_matches_hand_calculation(base):

@@ -1,0 +1,22 @@
+# Milestone 3 file-system script: 20 commands, all eight command types, 5 expected errors.
+# Hand-worked expected results are in tests/unit/test_file_manager.py (HAND_STEPS).
+mkdir /home
+mkdir /home/alice
+mkdir /home/alice/docs
+mkfile /home/alice/docs/todo.txt
+write /home/alice/docs/todo.txt "buy milk"
+append /home/alice/docs/todo.txt ", eggs"
+mkfile /home/alice/docs/empty.txt
+ls /home/alice
+ls /home/alice/docs
+cat /home/alice/docs/todo.txt
+mkdir /home/alice/docs
+mkfile /nodir/x.txt
+cat /home/alice/docs/nothing.txt
+rm /home/alice/docs
+rmdir /home/alice/docs
+write /home/alice/docs/empty.txt "x"
+rm /home/alice/docs/empty.txt
+rm /home/alice/docs/todo.txt
+rmdir /home/alice/docs
+ls /home

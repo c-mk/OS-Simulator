@@ -32,32 +32,32 @@ python -m ossim.ui          # then open http://127.0.0.1:8000 in Firefox or Chro
 The server only listens on localhost. Opening `index.html` as a file still shows the pages, but the Process page then
 says "Engine not connected" and can only show the hand-calculated baseline, because the engine runs behind the server.
 
-## Milestone 3 demo: Memory & File Management
+## Milestone 3 demo: Memory, File and Integration
 
-1. Start the dashboard and open **Process** in the left menu. The green banner should say "Engine connected".
-2. Pick a policy. Set **q** for Round-Robin, **context switch** (ms) for dispatcher overhead, and **aging** (ms, 0 = off)
-   for Priority. The workload box takes CSV (`pid,arrival,burst,priority`); the default is the baseline workload.
-3. Use the toolbar: **Run** plays the simulation event by event at the chosen speed (1x, 2x, 5x, Max); **Pause** holds it;
-   **Step** advances one event; **Reset** clears the run and keeps your inputs. The clock and state at the top right follow along.
-4. Read the results: CPU Gantt chart (process bars, `CS` context-switch bars, `IDLE` gaps), per-process and average
-   metrics, the process state timeline (with a text version under "Text version of the timeline"), and the event log.
-5. **Testing center** runs baseline and bad-input checks against the engine. **Event explorer** shows the same events with search and filter. **Comparison center** still shows the hand-calculated
-   baseline for all six policies side by side.
+Start the dashboard (`python -m ossim.ui`) and check the green "Engine connected" banner on each page. The Process page
+(Milestone 2) is unchanged; its walk-through is in `docs/process_manager_report.md`.
 
-Bad input never changes anything: **Validate workload** and **Run** report the line and the problem (for example
-`Line 3: duplicate pid P1`, `Quantum must be at least 1 ms`).
+**Memory page (about 2 minutes).**
+1. Pick **LRU**, 3 frames, 4096-byte pages. Press **Baseline trace**, then **Run selected policy**. Read the hit/fault timeline, the frame
+   occupancy chart (and its text table), the page table and the metrics: 7 faults, 4 evictions.
+2. Press **Compare FIFO vs LRU**: FIFO 8 faults, LRU 7 faults on the same trace. Press **Locality trace** and compare again: FIFO 12, LRU 8.
+3. Export CSV or JSON from the buttons under the results.
 
-Suggested walk-through for the demo (about 2 minutes):
-1. FCFS on the baseline: Gantt P1 0-8, P2 8-12, P3 12-21, P4 21-26; averages 15.25 turnaround, 8.75 waiting.
-2. SRTF: P1 is preempted at 1 ms; average waiting drops to 6.5.
-3. Round-Robin q = 4, then set context switch to 1: `CS` bars appear and makespan grows from 26 to 33 ms.
-4. Paste `inputs/starvation.csv`, choose Priority, run with aging 0 and then aging 2: process L finishes at 10 ms, then at 4 ms.
-5. Type a bad workload (duplicate pid or burst 0) to show the error messages; press Reset.
-6. Open **Testing center** and press **Run process checks**: the six baseline policies and three bad inputs run through the engine and show pass/fail with expected and actual values.
-7. Optional: pick **Stop: t = 10 ms** in the toolbar and Run to show a stop condition; the page says the run was stopped early.
+**File page (about 2 minutes).**
+1. Press **Baseline script (12)** then **Run script**. Results: 9 ok, 3 safe errors. Press **Sample script (20)** to see all eight commands, five expected errors and the file tree with metadata.
+2. Press **Reset**, then **Step one command** to run one command at a time; the tree and operation log update after each.
+3. Set the user to `guest` (or change the root permission) and run again: commands are refused as `denied` and the tree is unchanged.
+4. Export the operation log as CSV. Rules and limits: `docs/file_manager.md`.
 
-Input files: `inputs/process_baseline.csv` (4 processes), `inputs/processes.csv` (7 processes with an idle gap),
-`inputs/starvation.csv` (aging demo). Rules and tie-breakers: `docs/tie_breakers.md`.
+**Integration page (about 2 minutes).** Use the default workload and requests, press **Run integration**. The lanes show each process on the CPU,
+blocked on a page fault, and blocked on a file request, then ready again. The correlated log can be filtered by source.
+A request from a user without permission shows as `denied`. What is and is not modeled: `docs/adr/0004-integration.md`.
+
+**Testing center** (**Run engine checks**) runs the process, memory, file and integration checks against the engine (19 of 19 pass). **Comparison center**
+now includes the FIFO vs LRU results; **Export** downloads each run. Results tables and the figure: `docs/m3_results.md`.
+
+Input files: `inputs/trace_baseline.txt`, `inputs/trace_locality.txt`, `inputs/fs_baseline.txt` (12 commands), `inputs/fs_script.txt` (20 commands),
+plus the process workloads from Milestone 2.
 
 ## Run the tests
 
@@ -72,6 +72,9 @@ CI (`.github/workflows/ci.yml`) runs both on every pull request and on `main`. T
 `test_process_errors.py` (rejected configuration and workloads, state machine), `test_process_inputs.py`,
 `test_controller.py` (clock, event order, run/pause/step/reset, seed replay, event limit) and
 `tests/integration/test_ui_api.py` (the dashboard server running the real engine).
+Milestone 3 adds `test_memory_manager.py`, `test_memory_api.py`, `test_memory_locality.py` (hand-worked FIFO/LRU traces), `test_file_manager.py`
+(every command, errors, limits, permissions, process requests), `test_file_api.py`, `test_integration.py` (hand-worked process + memory + file case)
+and `tests/integration/test_ui_api_m3.py` (HTTP routes). Regenerate the results and figure with `PYTHONPATH=. python experiments/m3_results.py`.
 
 ## Repository layout
 
@@ -82,7 +85,7 @@ ossim/
   managers/    base.py (Appendix A interface) + process/ memory/ file/ security/ device/ network/
   parallel/    cores, distribution policies, sync primitives, deadlock detection
   io/          loaders.py (validated CSV/JSON/text import), export
-  ui/          dashboard (prototype/index.html) and the localhost server with the /api/process endpoints
+  ui/          dashboard (prototype/index.html) and the localhost server with the /api/process, /api/memory, /api/file and /api/integration endpoints
 inputs/            baseline + team scenarios (instructor examples are never edited)
 expected_results/  hand-calculated expected outputs for small deterministic cases
 tests/             unit/, integration/, regression/, invalid/, stress/
@@ -119,7 +122,16 @@ progress report.
 Student modification: The team generated the first draft of the process manager, controller, tests, dashboard and docs in one session. The team reviewed the output, ran pytest and ruff locally on Python 3.12, and tested the dashboard in a browser. Rasheed removed an outdated test file (test_process_manager.py) that conflicted with the new manager. Christian fixed whitespace lint in scheduler.py, wired the changes into branches and pull requests, and filled in this entry.. Verification: pytest and ruff run ; baseline values compared with `expected_results/process_baseline.json`; re-derived the hand-worked cases in `test_process_scenarios.py` independently and found no differences. Affected files/sections: those
 listed under Use.
 
-**Sourced Tools –– (Milestone 3)**
 
-**Other tools:** Python 3 standard library; pytest and ruff (testing/linting only); GitHub and GitHub Actions; Firefox.
-No third-party code implements any simulator algorithm.
+**Sourced Tools — GenAI Entry (Milestone 3).** Tool/model: Claude (Anthropic), Claude Sonnet 5.5, in Claude Code / the Claude desktop app.
+Access date: November 6, 2026. Instructor-authorized purpose: helping plan and draft the Milestone 3 work (File Manager, process/memory/file
+integration, dashboard views, tests and results), with the team checking and approving everything it produced. Use: drafted the File Manager
+(`ossim/managers/file/`), the process/memory/file integration (`ossim/integration.py`), the file and integration server routes
+(`ossim/ui/file_api.py`, `integration_api.py`, `process_api.py`, `__main__.py`), the Memory, File and Integration dashboard pages
+(`ossim/ui/prototype/index.html`), `inputs/fs_script.txt`, the file, integration, locality and HTTP tests, `docs/file_manager.md`,
+`docs/m3_results.md`, `experiments/m3_results.py`, ADR-0004 and the architecture update, and this README section.
+Student modification: Christian reviewed the generated code, ran pytest and ruff locally on Python 3.12, tried the dashboard pages in a
+browser, and wired the changes into the feature branch and pull request. Copernic's memory manager and memory API were written by the team and
+were not changed by the AI. Verification: pytest (240 tests pass) and ruff run locally; the FIFO/LRU, file-system and integration tests use
+hand-worked expected values (listed in the test files), and the engine output was compared with them and with `expected_results/*.json`;
+dashboard flows (run, step, reset, compare, exports) checked in a browser. Affected files/sections: those listed under Use.
