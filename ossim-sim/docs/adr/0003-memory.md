@@ -1,3 +1,7 @@
+Milestone 3
+
+# Decision
+
 •	FIFO and LRU on identical address traces; page/frame state, faults, evictions, latency, and visuals.
 
 •	Hierarchical in-memory file system supporting every required command and safe error handling.
@@ -7,3 +11,15 @@
 •	Initial integration: process-generated memory references and authorized process file requests; demonstrate blocked/ready behavior where modeled.
 
 •	Automated tests, test trace, 12+ command file script, results table/figure, updated architecture and contribution log.
+
+
+# Why
+
+Working modules and dashboard views, metrics, visuals, tests, comparison results, integration contract/FIFO/LRU, trace import, frame state; file tree, commands, path/error handling.
+
+# Consequence
+
+
+Correct FIFO/LRU and file commands, visuals, metrics, tests, and early integration.
+
+
