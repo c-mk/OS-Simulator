@@ -119,5 +119,7 @@ progress report.
 Student modification: The team generated the first draft of the process manager, controller, tests, dashboard and docs in one session. The team reviewed the output, ran pytest and ruff locally on Python 3.12, and tested the dashboard in a browser. Rasheed removed an outdated test file (test_process_manager.py) that conflicted with the new manager. Christian fixed whitespace lint in scheduler.py, wired the changes into branches and pull requests, and filled in this entry.. Verification: pytest and ruff run ; baseline values compared with `expected_results/process_baseline.json`; re-derived the hand-worked cases in `test_process_scenarios.py` independently and found no differences. Affected files/sections: those
 listed under Use.
 
+**Sourced Tools –– (Milestone 3)**
+
 **Other tools:** Python 3 standard library; pytest and ruff (testing/linting only); GitHub and GitHub Actions; Firefox.
 No third-party code implements any simulator algorithm.
