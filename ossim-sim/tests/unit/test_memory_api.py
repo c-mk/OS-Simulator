@@ -4,6 +4,8 @@ from ossim.ui.memory_api import handle
 
 TRACE = open("inputs/trace_baseline.txt").read()
 
+import sys
+sys.path.append("os-sim/OS-Simulator/ossim-sim")
 
 def test_run_returns_events_snapshot_metrics():
     code, out = handle("/api/memory/run", {"trace": TRACE, "policy": "fifo", "page_size": 4096, "frames": 3})
