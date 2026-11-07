@@ -8,3 +8,13 @@
 | 2 | Arian | | | | |
 | 2 | Christian | | | | |
 | 2 | Derrick | | | | |
+
+
+| Week | Member | Completed (links to PRs/issues) | Reviews done | Blockers | Next |
+| --- | --- | --- | --- | --- | --- |
+| 3 | Rasheed | | | | |
+| 3 | Copernic | | |  |
+| 2 | Liberty | | | | |
+| 2 | Arian | | | | |
+| 2 | Christian | | | | |
+| 2 | Derrick | | | | |
