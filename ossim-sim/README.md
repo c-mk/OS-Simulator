@@ -32,7 +32,7 @@ python -m ossim.ui          # then open http://127.0.0.1:8000 in Firefox or Chro
 The server only listens on localhost. Opening `index.html` as a file still shows the pages, but the Process page then
 says "Engine not connected" and can only show the hand-calculated baseline, because the engine runs behind the server.
 
-## Milestone 2 demo: process scheduling
+## Milestone 3 demo: Memory & File Management
 
 1. Start the dashboard and open **Process** in the left menu. The green banner should say "Engine connected".
 2. Pick a policy. Set **q** for Round-Robin, **context switch** (ms) for dispatcher overhead, and **aging** (ms, 0 = off)
