@@ -1,0 +1,24 @@
+# Locality trace: same format and settings as trace_baseline.txt.
+# Pages 0 and 1 are a hot set that is touched again and again; pages 2, 3, 4 are cold, one-off visits.
+# LRU keeps the hot pages resident; FIFO evicts them just because they were loaded first.
+# page_size=4096 bytes, frames=3, pid=P1
+0x0040
+0x10A0
+0x0044
+0x10B0
+0x2010
+0x0048
+0x10A4
+0x3000
+0x0050
+0x10B4
+0x4020
+0x0054
+0x10A8
+0x2014
+0x0058
+0x10AC
+0x3004
+0x005C
+0x10B8
+0x4024
