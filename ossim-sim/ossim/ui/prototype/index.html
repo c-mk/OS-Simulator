@@ -224,7 +224,7 @@ function endState(){ return RUN&&RUN.res.finished===false?"Stopped":"Finished"; 
 function stopTimer(){ if(TIMER){clearInterval(TIMER);TIMER=null} }
 function sync(){ setClock(visibleUntil()); drawRun(); }
 async function ctl(act){
-  if(CURPAGE==="memory"||CURPAGE==="file"||CURPAGE==="integration") return pageCtl(act);
+  if(CURPAGE==="memory"||CURPAGE==="file"||CURPAGE==="integration"||CURPAGE==="device"||CURPAGE==="network") return pageCtl(act);
   if(!$("#alg")){ show("process"); await engineStatus(); banner(); }
   if(act==="Reset"){ stopTimer(); RUN=null; CUR=0; setClock(0); setState("Ready"); const o=$("#pout"); if(o) o.innerHTML=""; showMsgs([]); toast("Reset: run cleared, inputs kept"); return; }
   if(act==="Batch"){ toast("Batch runs are planned for a later milestone. Use the Comparison center for several policies."); return; }
@@ -501,6 +501,7 @@ function wireIntegration(){
   if(INT) drawInt();
 }
 function pageCtl(act){
+  if(CURPAGE==="device"||CURPAGE==="network"){ if(act==="Run") return runDeviceNetwork(); if(act==="Reset"){ const o=$("#dnout"); if(o)o.innerHTML=""; setClock(0);setState("Ready");toast("Results cleared; inputs kept");return; } if(act==="Pause"){toast("This manager runs to completion in one request.");return;} if(act==="Step"){toast("Use Run to execute the manager scenario.");return;} }
   if(act==="Run"){ if(CURPAGE==="memory") return memRun("run"); if(CURPAGE==="file"){ FSTEP=0; return fileRun(0); } return intRun(); }
   if(act==="Step"){ if(CURPAGE==="file") return fileStep(); toast("Step runs one command on the File page. Memory and Integration run to the end."); return; }
   if(act==="Reset"){ if(CURPAGE==="file") return fileReset(); if(CURPAGE==="memory"){ MEM=null; MEMCMP=null; const o=$("#mout"); if(o) o.innerHTML=""; } else { INT=null; const o=$("#iout"); if(o) o.innerHTML=""; } setClock(0); setState("Ready"); toast("Reset: results cleared, inputs kept"); return; }
@@ -547,6 +548,37 @@ const EXPORTS=[
  ["File event log (CSV)",()=>FIL?`${FIL.events.length} events`:"Run the File page first",()=>!!FIL,()=>dl("file_events.csv",eventsCsv(FIL.events))],
  ["Integration events (CSV)",()=>INT?`${INT.events.length} correlated events`:"Run the Integration demo first",()=>!!INT,()=>dl("integration_events.csv",eventsCsv(INT.events))],
 ];
+const DEVICE_BASE=[
+ {id:"disk-1",pid:"P1",device:"disk",at:0,cylinder:90},
+ {id:"disk-2",pid:"P2",device:"disk",at:0,cylinder:55},
+ {id:"printer-1",pid:"P3",device:"printer",at:2},
+ {id:"keyboard-1",pid:"P1",device:"keyboard",at:3}
+];
+const NETWORK_BASE={nodes:["A","B","C","D"],links:[
+ {from:"A",to:"B",delay:4,capacity:2},{from:"B",to:"C",delay:4,capacity:2},
+ {from:"A",to:"D",delay:2,capacity:2},{from:"D",to:"C",delay:2,capacity:2}],
+ packets:[{id:"PKT1",source:"A",destination:"C",at:0,priority:1},{id:"PKT2",source:"B",destination:"D",at:1,priority:3},{id:"PKT3",source:"A",destination:"B",at:2,priority:2}]};
+function wireDeviceNetwork(){
+ if(CURPAGE==="device"){$("#dreq").value=JSON.stringify(DEVICE_BASE,null,2);$("#drun").onclick=runDeviceNetwork;$("#dreset").onclick=()=>{$("#dreq").value=JSON.stringify(DEVICE_BASE,null,2);$("#dnout").innerHTML="";};}
+ else{$("#nscenario").value=JSON.stringify(NETWORK_BASE,null,2);$("#nrun").onclick=runDeviceNetwork;$("#nreset").onclick=()=>{$("#nscenario").value=JSON.stringify(NETWORK_BASE,null,2);$("#dnout").innerHTML="";};}
+ banner();engineStatus().then(banner);
+}
+async function runDeviceNetwork(){
+ let body,path;
+ try{
+  if(CURPAGE==="device"){body={queue_policy:$("#dqueue").value,disk_policy:$("#ddisk").value,disk_head:+$("#dhead").value,requests:JSON.parse($("#dreq").value)};path="/api/device/run";}
+  else{body={queue_policy:$("#nqueue").value,buffer_capacity:+$("#nbuffer").value,packet_ticks:+$("#npacket").value,...JSON.parse($("#nscenario").value)};path="/api/network/run";}
+ }catch(e){showErrs($("#dnout"),["Invalid JSON: "+e.message]);return;}
+ const r=await post(path,body);if(!r.ok){showErrs($("#dnout"),r.j.errors||["Simulation failed"]);return;}
+ const j=r.j,metrics=Object.entries(j.metrics).map(([k,v])=>metric(k.replaceAll("_"," "),v.value,v.unit)).join("");
+ const events=j.events.map(e=>`<tr><td>${e.time_ms.toFixed(1)}</td><td>${esc(e.event_type)}</td><td>${esc(e.entity_id)}</td><td>${esc(e.outcome)}</td><td>${esc(e.message)}</td></tr>`).join("");
+ let detail="";
+ if(CURPAGE==="device"){detail=`<h3>Device request results</h3><table><tr><th>Request</th><th>Device</th><th>Process</th><th>Start (ms)</th><th>End (ms)</th><th>Service (ms)</th><th>Outcome</th></tr>${j.snapshot.requests.map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.device)}</td><td>${esc(x.pid)}</td><td>${(x.start/10).toFixed(1)}</td><td>${(x.end/10).toFixed(1)}</td><td>${(x.service_ticks/10).toFixed(1)}</td><td>${esc(x.outcome)}</td></tr>`).join("")}</table><p class="sub">Disk head ended at cylinder ${j.snapshot.disk_head}. Disk movement is shown in the metrics.</p>`;}
+ else{detail=`<h3>Topology</h3><table><tr><th>From</th><th>To</th><th>Delay (ticks)</th><th>Buffer</th><th>Status</th></tr>${j.snapshot.topology.links.map(l=>`<tr><td>${esc(l.from)}</td><td>${esc(l.to)}</td><td>${l.delay}</td><td>${l.capacity}</td><td>${l.failed?"Failed":"Up"}</td></tr>`).join("")}</table><h3>Packet routes</h3><table><tr><th>Packet</th><th>Source → destination</th><th>Route</th><th>Status</th><th>Arrival (ms)</th></tr>${j.snapshot.packets.map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.source)} → ${esc(x.destination)}</td><td>${esc(x.route.join(" → "))}</td><td>${esc(x.status)}</td><td>${x.arrival===null?"—":(x.arrival/10).toFixed(1)}</td></tr>`).join("")}</table>`;}
+ $("#dnout").innerHTML=`<div class="grid">${metrics}</div>${detail}<h3>Event timeline (${j.events.length} events)</h3><div style="max-height:360px;overflow:auto"><table><tr><th>Time (ms)</th><th>Event</th><th>Entity</th><th>Outcome</th><th>Details</th></tr>${events}</table></div><div class="row"><button class="btn ghost" id="dncsv">Export CSV</button><button class="btn ghost" id="dnjson">Export JSON</button></div>${(j.warnings||[]).map(w=>`<p class="sub">Note: ${esc(w)}</p>`).join("")}`;
+ $("#dncsv").onclick=()=>dl(CURPAGE+"_results.csv",j.csv);$("#dnjson").onclick=()=>dl(CURPAGE+"_run.json",JSON.stringify(j,null,2),"application/json");setState("Finished");
+}
+
 const PAGES = {
 overview: () => `<h2>Overview</h2><p class="sub">Health of each manager, current run and warnings</p>
  <div class="grid">${[["Process","Copernic","M2"],["Memory","Copernic","M3"],["File","Liberty","M3"],["Security","Liberty","M4"],["Device","Arian","M4"],["Network","Arian","M4"],["Parallel","Rasheed","M4"]].map(m=>
@@ -603,8 +635,12 @@ integration: () => `<h2>Integration demo</h2><p class="sub">Process-generated me
  <div class="row" style="margin-top:8px"><button class="btn" id="irun">Run integration</button><button class="btn ghost" id="ireset">Restore demo inputs</button></div>
  <div id="iout" style="margin-top:12px"></div>`,
 security: () => placeholder("Security manager","Liberty","Milestone 4",[["Session","Login/logout with demo users (no real passwords)"],["Permission matrix","Users × resources, rwx per cell, text labels"],["Audit log","Append-only, filterable by severity and outcome"],["Alerts","Repeated failed logins, forbidden access"],["Severity chart","Events by info / warning / critical"]]),
-device: () => placeholder("Device manager","Arian","Milestone 4",[["Devices","Disk, printer, keyboard with status: available / busy / offline / error"],["Queues","Per-device request queue, FCFS"],["Disk policy","FCFS, SSTF, SCAN/C-SCAN"],["Disk-head plot","Cylinder vs time"],["Request timeline","Arrival, start, completion, outcome"]]),
-network: () => placeholder("Network manager","Arian","Milestone 4",[["Topology","Nodes, links, status and cost; route highlighted"],["Queues","FIFO vs priority / WRR"],["Packet timeline","Created, sent, delivered, dropped"],["Link utilization","Per link over time"],["Drop reasons","Buffer full, TTL expired, unreachable"]]),
+device: () => `<h2>Device manager</h2><p class="sub">Owner: Arian · Disk, printer and keyboard queues; disk scheduling and failure simulation</p>
+ <div class="row"><div><label for="dqueue">Device queue policy</label><select id="dqueue"><option value="fcfs">FCFS</option><option value="priority">Priority</option></select></div><div><label for="ddisk">Disk scheduling</label><select id="ddisk"><option value="sstf">SSTF</option><option value="fcfs">FCFS</option><option value="scan">SCAN</option></select></div><div><label for="dhead">Initial disk head</label><input id="dhead" type="number" value="50" min="0" style="width:90px"></div></div>
+ <label for="dreq">Device requests (JSON)</label><textarea id="dreq" class="mono" rows="9" spellcheck="false"></textarea><div class="row"><button class="btn" id="drun">Run device simulation</button><button class="btn ghost" id="dreset">Load baseline</button></div><div id="dnout" style="margin-top:12px"></div>`,
+network: () => `<h2>Network manager</h2><p class="sub">Owner: Arian · Topology, shortest-delay routing, packet queues, link delays, buffers and failure tests</p>
+ <div class="row"><div><label for="nqueue">Packet queue policy</label><select id="nqueue"><option value="fifo">FIFO</option><option value="priority">Priority</option></select></div><div><label for="nbuffer">Default link buffer capacity</label><input id="nbuffer" type="number" value="4" min="1" style="width:90px"></div><div><label for="npacket">Packet service ticks</label><input id="npacket" type="number" value="1" min="1" style="width:90px"></div></div>
+ <label for="nscenario">Network scenario (JSON)</label><textarea id="nscenario" class="mono" rows="13" spellcheck="false"></textarea><div class="row"><button class="btn" id="nrun">Run network simulation</button><button class="btn ghost" id="nreset">Load baseline</button></div><div id="dnout" style="margin-top:12px"></div>`,
 parallel: () => placeholder("Parallel computing","Rasheed (backup Copernic)","Milestone 4",[["Cores","1, 2 or 4 simulated cores"],["Distribution","Global ready queue vs least-loaded"],["Multicore Gantt","One lane per core"],["Synchronization","Mutex, semaphore/barrier timeline; race demo safe vs unsafe"],["Speedup / efficiency","T1/Tp and speedup/p by core count"],["Deadlock","Detected tasks and resources"]]),
 scenario: () => `<h2>Scenario builder</h2><p class="sub">Create and edit every input type; validation runs before saving</p>
  <div class="tabs" role="tablist">${["Processes","Address trace","File script","Users & policies","Device requests","Packets & links","Failure events"].map((t,i)=>`<button role="tab" aria-selected="${i===0}" data-tab="${i}">${t}</button>`).join("")}</div>
@@ -647,6 +683,7 @@ function show(page){
   if(page==="memory"){ wireMemory(); }
   if(page==="file"){ wireFile(); }
   if(page==="integration"){ wireIntegration(); }
+  if(page==="device"||page==="network"){ wireDeviceNetwork(); }
   if(page==="export"){ document.querySelectorAll("[data-ex]").forEach(b=>b.onclick=()=>EXPORTS[+b.dataset.ex][3]()); }
   if(page==="scenario"){ const sel=i=>{document.querySelectorAll("[role=tab]").forEach(t=>t.setAttribute("aria-selected",t.dataset.tab==i)); $("#tabbody").innerHTML=TABS[i]();
      if(i==0){ $("#addrow").onclick=()=>{$("#tabbody table").insertAdjacentHTML("beforeend",`<tr><td contenteditable>P5</td><td contenteditable>4</td><td contenteditable>-2</td><td contenteditable>1</td></tr>`)};
