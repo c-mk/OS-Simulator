@@ -1,1 +1,3 @@
-"""network manager. Owner: Arian. Implements ossim.managers.base.Manager (see RTM rows for this manager)."""
+"""Network manager exports."""
+from .manager import DEFAULTS, QUEUE_POLICIES, NetworkManager
+__all__=['DEFAULTS','QUEUE_POLICIES','NetworkManager']
