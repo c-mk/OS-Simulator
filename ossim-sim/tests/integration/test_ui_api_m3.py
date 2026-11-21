@@ -33,7 +33,7 @@ def call(base, path, body=None, raw=None):
 
 
 def test_status_names_the_three_managers(base):
-    assert call(base, "/api/status") == (200, {"engine": True, "detail": "Process, Memory and File managers loaded"})
+    assert call(base, "/api/status") == (200, {"engine": True, "detail": "Process, Memory, File, Security, Device and Network managers loaded"})
 
 
 def test_memory_compare_over_http_matches_the_hand_worked_trace_results(base):
