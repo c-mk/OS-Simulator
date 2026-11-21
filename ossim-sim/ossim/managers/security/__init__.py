@@ -1,1 +1,4 @@
-"""security manager. Owner: Liberty. Implements ossim.managers.base.Manager (see RTM rows for this manager)."""
+"""Security manager exports."""
+from .manager import DEFAULTS, SecurityManager
+
+__all__ = ["DEFAULTS", "SecurityManager"]
