@@ -9,6 +9,8 @@ Static files come from ossim/ui/prototype. A small JSON API under /api/ connects
   POST /api/memory/compare        same body; FIFO and LRU on the identical trace
   POST /api/file/run              {script, user?, users?, admins?, setup?, stop?}                          (file_api.py)
   POST /api/integration/run       process workload + per-process address traces + file requests            (integration_api.py)
+  POST /api/device/run            device requests, queue policy and disk scheduling                        (device_api.py)
+  POST /api/network/run           topology, packets, routing, queue policy and link failures               (network_api.py)
 Inputs are validated before anything runs; problems come back as {"errors": [...]} with status 422 and change nothing.
 Times in the response are integer ticks (1 tick = 0.1 ms). Written with Claude; see README Sourced Tools.
 """
@@ -19,7 +21,7 @@ import http.server
 import json
 from pathlib import Path
 
-from ossim.ui import file_api, integration_api, memory_api
+from ossim.ui import device_api, file_api, integration_api, memory_api, network_api, scenario_api, security_api
 from ossim.ui.process_api import build, result, valid_stop
 
 ROOT = Path(__file__).parent / "prototype"
@@ -28,6 +30,8 @@ PROCESS_PATHS = ("/api/process/run", "/api/process/step")
 OTHER_ROUTES = {
     "/api/memory/run": memory_api.handle, "/api/memory/compare": memory_api.handle,
     "/api/file/run": file_api.handle, "/api/integration/run": integration_api.handle,
+    "/api/device/run": device_api.handle, "/api/network/run": network_api.handle,
+    "/api/security/run": security_api.handle, "/api/scenario/run": scenario_api.handle,
 }
 
 
@@ -42,7 +46,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         if self.path == "/api/status":
-            return self._send(200, {"engine": True, "detail": "Process, Memory and File managers loaded"})
+            return self._send(200, {"engine": True, "detail": "Process, Memory, File, Security, Device and Network managers loaded"})
         return super().do_GET()
 
     def do_POST(self):  # noqa: N802

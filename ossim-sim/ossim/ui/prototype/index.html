@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OS Simulator Dashboard — Milestone 3 Process, Memory and File</title>
+<title>OS Simulator Dashboard — Six Manager Milestone 4</title>
 <style>
 :root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2330;--muted:#5d6676;--line:#d9dde4;--acc:#2f6fdb;--ok:#1f8a4c;--warn:#b26a00;--bad:#c23b3b;
 --p1:#2f6fdb;--p2:#e0702b;--p3:#1d9e74;--p4:#b8860b;--cs:#555;--idle:#bbb}
@@ -263,6 +263,7 @@ async function runChecks(){
   for(const [name,csv,frag] of BAD_CASES){ prog.textContent="Running "+name+"..."; const r=await post("/api/process/run",{csv}); const msg=(r.j.errors||[]).join(" | ");
     const ok=r.status===422&&msg.includes(frag); if(ok) pass++; rows.push([name,"Invalid input",ok,`rejected (422) with a message containing "${frag}"`,`${r.status}: ${msg||"accepted"}`,ok?"rejected, nothing changed":"not rejected as expected"]); }
   const extra=await m3Rows(prog); rows.push(...extra); pass+=extra.filter(r=>r[2]).length;
+  const m4=await m4Rows(prog);rows.push(...m4);pass+=m4.filter(r=>r[2]).length;
   prog.textContent=""; const bad=rows.length-pass;
   out.innerHTML=`<p><b>${pass} of ${rows.length} checks passed</b>${bad?` · <span class="err">${bad} failed</span>`:""}</p><table><tr><th>Test</th><th>Suite</th><th>Status</th><th>Expected</th><th>Actual</th><th>Diagnostics</th></tr>`+
     rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]?'<span class="badge b-ok">PASS</span>':'<span class="badge b-warn">FAIL</span>'}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td></tr>`).join("")+`</table>`;
@@ -283,7 +284,7 @@ function ptable(res){
 const placeholder = (title, owner, ms, panels) => `<h2>${title}</h2><p class="sub">Owner: ${owner} · Built in ${ms}</p>${protoNote("final layout of this workspace. Panels show what each area will contain; data appears when the manager is implemented.")}
  <div class="grid">${panels.map(p=>`<div class="card"><h3>${p[0]}</h3><p class="sub" style="margin:0">${p[1]}</p></div>`).join("")}</div>`;
 /* ===== Milestone 3: Memory, File and Integration pages (all values come from the engine over /api/) ===== */
-let CURPAGE="overview", MEM=null, MEMCMP=null, FIL=null, FSTEP=0, INT=null;
+let CURPAGE="overview", MEM=null, MEMCMP=null, FIL=null, FSTEP=0, INT=null, SEC=null, FULL=null;
 let MEMTRACE=null, FSCRIPT=null, FUSER="admin", FROOT="755";
 const TRACE_BASE=["0x0040","0x10A0","0x0044","0x20B0","0x3010","0x0048","0x10A4","0x4000","0x0050","0x20B4"].join("\n");
 const TRACE_LOC=["0x0040","0x10A0","0x0044","0x10B0","0x2010","0x0048","0x10A4","0x3000","0x0050","0x10B4","0x4020","0x0054","0x10A8","0x2014","0x0058","0x10AC","0x3004","0x005C","0x10B8","0x4024"].join("\n");
@@ -298,6 +299,7 @@ const INT_TRACES="P1: 0x0000 0x1000 0x0000 0x2000 0x3000 0x0000 0x1000 0x4000\nP
 const INT_USERS="P1=alice\nP2=bob\nP3=guest\nP4=admin";
 const INT_REQS=["P1 1 mkdir /shared","P1 2 mkfile /shared/a.txt","P1 3 write /shared/a.txt \"report\"","P2 9 cat /shared/a.txt","P2 10 write /shared/a.txt \"edit\"",
  "P3 13 cat /shared/a.txt","P3 14 mkfile /shared/b.txt","P4 22 rm /shared/a.txt"].join("\n");
+const SEC_BASE={operations:[{action:"login",user:"alice",at:0},{action:"access",user:"alice",resource:"files",permission:"read",at:1},{action:"access",user:"alice",resource:"files",permission:"delete",at:2},{action:"logout",user:"alice",at:3},{action:"login",user:"guest",at:4},{action:"access",user:"guest",resource:"network",permission:"write",at:5},{action:"login",user:"intruder",at:6},{action:"login",user:"intruder",at:7},{action:"login",user:"intruder",at:8}]};
 const INTSTATE={procs:INT_PROCS,traces:INT_TRACES,users:INT_USERS,reqs:INT_REQS,policy:"fcfs",lat:"1.0"};
 
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -496,11 +498,42 @@ function wireIntegration(){
   const S=INTSTATE, map={ipol:"policy",iprocs:"procs",itraces:"traces",iusers:"users",ireqs:"reqs",ilat:"lat"};
   for(const [id,k] of Object.entries(map)){ $("#"+id).value=S[k]; $("#"+id).oninput=$("#"+id).onchange=()=>{S[k]=$("#"+id).value}; }
   $("#irun").onclick=()=>intRun();
+  $("#irunfull").onclick=()=>runFullScenario();
   $("#ireset").onclick=()=>{ Object.assign(S,{procs:INT_PROCS,traces:INT_TRACES,users:INT_USERS,reqs:INT_REQS,policy:"fcfs",lat:"1.0"}); INT=null; show("integration"); toast("Demo inputs restored"); };
   banner(); engineStatus().then(banner);
   if(INT) drawInt();
 }
+function wireSecurity(){
+  $("#secops").value=JSON.stringify(SEC_BASE,null,2);
+  $("#secrun").onclick=runSecurity;
+  $("#secreset").onclick=()=>{$("#secops").value=JSON.stringify(SEC_BASE,null,2);SEC=null;$("#secout").innerHTML="";setState("Ready");};
+  banner();engineStatus().then(banner);
+}
+async function runSecurity(){
+  let body;try{body=JSON.parse($("#secops").value);}catch(e){showErrs($("#secout"),["Invalid JSON: "+e.message]);return;}
+  const r=await post("/api/security/run",body);if(!r.ok){showErrs($("#secout"),r.j.errors||["Security run failed"]);return;}
+  SEC=r.j;const m=SEC.metrics,rows=SEC.snapshot.audit_log;
+  const metrics=Object.entries(m).map(([k,v])=>metric(k.replaceAll("_"," "),v.value,v.unit)).join("");
+  const alerts=SEC.snapshot.alerts.map(a=>`<tr><td>${a.time}</td><td>${esc(a.severity)}</td><td>${esc(a.user)}</td><td>${esc(a.message)}</td></tr>`).join("");
+  const audit=rows.map(a=>`<tr data-sev="${a.severity}" data-out="${a.outcome}"><td>${a.seq}</td><td>${a.time}</td><td>${esc(a.user)}</td><td>${esc(a.action)}</td><td>${esc(a.resource)}</td><td>${esc(a.permission)}</td><td>${esc(a.outcome)}</td><td>${esc(a.severity)}</td><td>${esc(a.message)}</td></tr>`).join("");
+  const roles=Object.entries(SEC.snapshot.roles).map(([role,grants])=>`<tr><td>${esc(role)}</td><td>${esc(Object.entries(grants).map(([resource,actions])=>resource+": "+actions.join(", ")).join("; "))}</td></tr>`).join("");
+  $("#secout").innerHTML=`<div class="grid">${metrics}</div><h3>Role permissions</h3><table><tr><th>Role</th><th>Grants</th></tr>${roles}</table><h3>Alerts (${SEC.snapshot.alerts.length})</h3><table><tr><th>Tick</th><th>Severity</th><th>User</th><th>Alert</th></tr>${alerts||'<tr><td colspan="4">No alerts</td></tr>'}</table><h3>Append-only audit log (${rows.length} records)</h3><div class="row"><div><label for="secsev">Severity filter</label><select id="secsev"><option value="">All</option><option>info</option><option>warning</option><option>critical</option></select></div><div><label for="secoutcome">Outcome filter</label><select id="secoutcome"><option value="">All</option><option>ok</option><option>denied</option><option>failed</option></select></div></div><div style="max-height:360px;overflow:auto"><table id="sectab"><tr><th>Seq</th><th>Tick</th><th>User</th><th>Action</th><th>Resource</th><th>Permission</th><th>Outcome</th><th>Severity</th><th>Message</th></tr>${audit}</table></div><div class="row" style="margin-top:10px"><button class="btn ghost" id="secCSV">Export audit CSV</button><button class="btn ghost" id="secJSON">Export run JSON</button></div>`;
+  const filter=()=>{const sev=$("#secsev").value,out=$("#secoutcome").value;document.querySelectorAll("#sectab tr[data-sev]").forEach(tr=>tr.style.display=(!sev||tr.dataset.sev===sev)&&(!out||tr.dataset.out===out)?"":"none");};
+  $("#secsev").onchange=filter;$("#secoutcome").onchange=filter;
+  $("#secCSV").onclick=()=>dl("security_audit.csv",SEC.csv);$("#secJSON").onclick=()=>dl("security_run.json",JSON.stringify(SEC,null,2),"application/json");setState("Finished");
+}
+async function runFullScenario(){
+  const parsed=parseInt3();if(parsed.errs.length){showErrs($("#iout"),parsed.errs);return;}
+  const body={...parsed.body,security:SEC_BASE,device:{queue_policy:"fcfs",disk_policy:"sstf",requests:[{id:"disk-1",pid:"P1",device:"disk",at:0,cylinder:90},{id:"printer-1",pid:"P2",device:"printer",at:2},{id:"keyboard-1",pid:"P1",device:"keyboard",at:3}]},network:{queue_policy:"fifo",nodes:["A","B","C","D"],links:[{from:"A",to:"B",delay:4,capacity:2},{from:"B",to:"C",delay:4,capacity:2},{from:"A",to:"D",delay:2,capacity:2},{from:"D",to:"C",delay:2,capacity:2}],packets:[{id:"PKT1",source:"A",destination:"C",at:0,priority:1},{id:"PKT2",source:"B",destination:"D",at:1,priority:3}]}};
+  const r=await post("/api/scenario/run",body);if(!r.ok){showErrs($("#iout"),r.j.errors||["Integrated scenario failed"]);return;}
+  FULL=r.j;const mgr=FULL.managers;const summary=Object.entries(mgr).map(([name,data])=>{const metrics=data.metrics||{};return `<div class="card"><h3>${esc(name)}</h3>${Object.entries(metrics).map(([k,v])=>`<div>${esc(k.replaceAll("_"," "))}: <b>${esc(v.value)} ${esc(v.unit)}</b></div>`).join("")}</div>`;}).join("");
+  const events=FULL.events.map(e=>`<tr><td>${e.seq}</td><td>${(e.time/10).toFixed(1)}</td><td>${esc(e.manager)}</td><td>${esc(e.event_type)}</td><td>${esc(e.entity_id)}</td><td>${esc(e.outcome)}</td><td>${esc(e.message)}</td></tr>`).join("");
+  $("#iout").innerHTML=`<h3>Six-manager scenario result</h3><div class="note">${esc(FULL.integration_boundary)}</div><div class="grid">${summary}</div><h3>Shared event timeline (${FULL.events.length} events)</h3><div style="max-height:420px;overflow:auto"><table><tr><th>Seq</th><th>Time (ms)</th><th>Manager</th><th>Event</th><th>Entity</th><th>Outcome</th><th>Message</th></tr>${events}</table></div><div class="row" style="margin-top:10px"><button class="btn ghost" id="fullexport">Export six-manager run (JSON)</button></div>`;
+  $("#fullexport").onclick=()=>dl("six_manager_scenario.json",JSON.stringify(FULL,null,2),"application/json");setClock(FULL.events.length?FULL.events[FULL.events.length-1].time/10:0);setState("Finished");
+}
+
 function pageCtl(act){
+  if(CURPAGE==="security"){ if(act==="Run") return runSecurity(); if(act==="Reset"){SEC=null;const o=$("#secout");if(o)o.innerHTML="";setState("Ready");return;} }
   if(CURPAGE==="device"||CURPAGE==="network"){ if(act==="Run") return runDeviceNetwork(); if(act==="Reset"){ const o=$("#dnout"); if(o)o.innerHTML=""; setClock(0);setState("Ready");toast("Results cleared; inputs kept");return; } if(act==="Pause"){toast("This manager runs to completion in one request.");return;} if(act==="Step"){toast("Use Run to execute the manager scenario.");return;} }
   if(act==="Run"){ if(CURPAGE==="memory") return memRun("run"); if(CURPAGE==="file"){ FSTEP=0; return fileRun(0); } return intRun(); }
   if(act==="Step"){ if(CURPAGE==="file") return fileStep(); toast("Step runs one command on the File page. Memory and Integration run to the end."); return; }
@@ -533,6 +566,27 @@ async function m3Rows(prog){
     ["T-INV-06 File: unknown command","/api/file/run",{script:"format /\n"},"unknown command"],["T-INV-07 Integration: unknown process","/api/integration/run",{...parseIntDefaults(),memory:{traces:{P9:"0x0"}},files:{}},"not in the workload"]];
   for(const [name,path,b,frag] of bad){ prog.textContent="Running "+name+"..."; const r=await post(path,b); const msg=(r.j.errors||[]).join(" | "); const ok=r.status===422&&msg.includes(frag);
     add(name,"Invalid input",ok,`rejected (422) with a message containing "${frag}"`,`${r.status}: ${msg||"accepted"}`,ok?"rejected, nothing changed":"not rejected as expected"); }
+  return rows;
+}
+async function m4Rows(prog){
+  const rows=[],add=(name,ok,expected,actual)=>rows.push([name,"Milestone 4",ok,expected,actual,ok?"passed":"did not match expected result"]);
+  prog.textContent="Running Security Manager check...";
+  const sec=await post("/api/security/run",{operations:[{action:"login",user:"alice"},{action:"access",user:"alice",resource:"files",permission:"read"},{action:"access",user:"alice",resource:"files",permission:"delete"}]});
+  const secok=sec.ok&&sec.j.metrics.authorized.value===2&&sec.j.metrics.denied.value===1&&sec.j.snapshot.audit_log.length===3;
+  add("T-SEC-01 Role authorization and audit trail",secok,"2 authorized, 1 denied, 3 audit records",sec.ok?`${sec.j.metrics.authorized.value} authorized, ${sec.j.metrics.denied.value} denied, ${sec.j.snapshot.audit_log.length} records`:(sec.j.errors||[]).join(" | "));
+  const badsec=await post("/api/security/run",{operations:[{action:"login",user:"intruder"},{action:"login",user:"intruder"},{action:"login",user:"intruder"}]});
+  const alertok=badsec.ok&&badsec.j.snapshot.alerts.some(a=>a.severity==="critical");add("T-SEC-02 Repeated failed login alert",alertok,"critical alert after configured threshold",badsec.ok?`${badsec.j.snapshot.alerts.length} alerts`:(badsec.j.errors||[]).join(" | "));
+  prog.textContent="Running Device Manager check...";
+  const dev=await post("/api/device/run",{queue_policy:"priority",disk_policy:"sstf",requests:[{id:"d1",device:"disk",cylinder:70},{id:"p1",device:"printer"},{id:"k1",device:"keyboard",failed:true}]});
+  const devok=dev.ok&&dev.j.metrics.requests.value===3&&dev.j.metrics.failures.value===1;add("T-DEV-01 Device queues and failure injection",devok,"3 requests; 1 injected failure",dev.ok?`${dev.j.metrics.requests.value} requests; ${dev.j.metrics.failures.value} failures`:(dev.j.errors||[]).join(" | "));
+  prog.textContent="Running Network Manager check...";
+  const net=await post("/api/network/run",{queue_policy:"fifo",nodes:["A","B","C","D"],links:[{from:"A",to:"B",delay:5},{from:"B",to:"C",delay:5},{from:"A",to:"D",delay:2},{from:"D",to:"C",delay:2}],packets:[{id:"p1",source:"A",destination:"C"}]});
+  const netok=net.ok&&net.j.snapshot.packets[0].route.join("-")==="A-D-C"&&net.j.metrics.delivered.value===1;add("T-NET-01 Shortest-delay packet routing",netok,"route A-D-C; 1 delivered",net.ok?`${net.j.snapshot.packets[0].route.join("-")}; ${net.j.metrics.delivered.value} delivered`:(net.j.errors||[]).join(" | "));
+  prog.textContent="Running six-manager integration check...";
+  const b={...parseIntDefaults(),security:{operations:[{action:"login",user:"alice"}]},device:{requests:[{id:"d1",device:"disk",cylinder:60}]},network:{nodes:["A","B"],links:[{from:"A",to:"B",delay:2}],packets:[{id:"p1",source:"A",destination:"B"}]}};
+  const full=await post("/api/scenario/run",b);const expected=["process","memory","file","security","device","network"];
+  const fullok=full.ok&&expected.every(k=>full.j.managers[k])&&expected.every(k=>full.j.events.some(e=>e.manager===k));
+  add("T-INT-04 Six-manager shared event timeline",fullok,"all six managers represented in one ordered event stream",full.ok?`${Object.keys(full.j.managers).join(", ")}; ${full.j.events.length} events`:(full.j.errors||[]).join(" | "));
   return rows;
 }
 function parseIntDefaults(){ const keep={...INTSTATE}; Object.assign(INTSTATE,{procs:INT_PROCS,traces:INT_TRACES,users:INT_USERS,reqs:INT_REQS,policy:"fcfs",lat:"1.0"}); const r=parseInt3().body; Object.assign(INTSTATE,keep); return r; }
@@ -582,9 +636,9 @@ async function runDeviceNetwork(){
 const PAGES = {
 overview: () => `<h2>Overview</h2><p class="sub">Health of each manager, current run and warnings</p>
  <div class="grid">${[["Process","Copernic","M2"],["Memory","Copernic","M3"],["File","Liberty","M3"],["Security","Liberty","M4"],["Device","Arian","M4"],["Network","Arian","M4"],["Parallel","Rasheed","M4"]].map(m=>
- `<div class="card"><h3>${m[0]} manager</h3><span class="badge b-todo" ${["Process","Memory","File"].includes(m[0])?`id="ov-${m[0].toLowerCase()}"`:""}>${["Process","Memory","File"].includes(m[0])?"Checking":"Not built"}</span><p class="sub" style="margin:6px 0 0">Owner ${m[1]} · due ${m[2]}</p></div>`).join("")}</div>
- <div class="row" style="margin-top:14px"><div class="card" style="flex:1"><h3>Run summary</h3>Scenario <b>baseline-01</b> · seed 42 · Milestone 3 build</div>
- <div class="card" style="flex:1"><h3>Warnings</h3><span class="badge b-todo">Status</span> Process, Memory and File are wired to the engine. Security, Device, Network and Parallel are Milestone 4.</div></div>`,
+ `<div class="card"><h3>${m[0]} manager</h3><span class="badge b-todo" ${["Process","Memory","File","Security","Device","Network"].includes(m[0])?`id="ov-${m[0].toLowerCase()}"`:""}>${["Process","Memory","File","Security","Device","Network"].includes(m[0])?"Checking":"Separate component"}</span><p class="sub" style="margin:6px 0 0">Owner ${m[1]} · due ${m[2]}</p></div>`).join("")}</div>
+ <div class="row" style="margin-top:14px"><div class="card" style="flex:1"><h3>Run summary</h3>Scenario <b>baseline-01</b> · seed 42 · six manager Milestone 4 build</div>
+ <div class="card" style="flex:1"><h3>Warnings</h3><span class="badge b-ok">Connected</span> Process, Memory, File, Security, Device and Network are wired to the engine. Parallel computing remains a separate component.</div></div>`,
 process: () => `<h2>Process manager</h2><p class="sub">Owner: Copernic · CPU scheduling (spec 4.1)</p>
  <div id="engbanner" class="note" role="status"></div>
  <div class="row">
@@ -632,9 +686,12 @@ integration: () => `<h2>Integration demo</h2><p class="sub">Process-generated me
  <div class="row" style="margin-top:10px"><div style="flex:1;min-width:240px"><label for="iusers">User each process runs as (PID=user)</label><textarea id="iusers" class="mono" rows="5"></textarea>
    <p class="sub" style="margin:2px 0 0">alice and bob are group staff, guest is not, admin bypasses permissions. Root is 775.</p></div>
   <div style="flex:2;min-width:300px"><label for="ireqs">File requests (PID time_ms command arguments)</label><textarea id="ireqs" class="mono" rows="5"></textarea></div></div>
- <div class="row" style="margin-top:8px"><button class="btn" id="irun">Run integration</button><button class="btn ghost" id="ireset">Restore demo inputs</button></div>
+ <div class="row" style="margin-top:8px"><button class="btn" id="irun">Run process + memory + file</button><button class="btn" id="irunfull">Run all six managers</button><button class="btn ghost" id="ireset">Restore demo inputs</button></div>
  <div id="iout" style="margin-top:12px"></div>`,
-security: () => placeholder("Security manager","Liberty","Milestone 4",[["Session","Login/logout with demo users (no real passwords)"],["Permission matrix","Users × resources, rwx per cell, text labels"],["Audit log","Append-only, filterable by severity and outcome"],["Alerts","Repeated failed logins, forbidden access"],["Severity chart","Events by info / warning / critical"]]),
+security: () => `<h2>Security manager</h2><p class="sub">Owner: Liberty · Role-based users, permissions, authorization, alerts and append-only audit history</p>
+ <div class="note">Demo identities only: this simulator does not store real passwords or authenticate real accounts. Access is granted only to active sessions with a role permission.</div>
+ <label for="secops">Security scenario (JSON: operations; optional users, roles and failed-login threshold)</label><textarea id="secops" class="mono" rows="12" spellcheck="false"></textarea>
+ <div class="row"><button class="btn" id="secrun">Run security checks</button><button class="btn ghost" id="secreset">Load baseline</button></div><div id="secout" style="margin-top:12px"></div>`,
 device: () => `<h2>Device manager</h2><p class="sub">Owner: Arian · Disk, printer and keyboard queues; disk scheduling and failure simulation</p>
  <div class="row"><div><label for="dqueue">Device queue policy</label><select id="dqueue"><option value="fcfs">FCFS</option><option value="priority">Priority</option></select></div><div><label for="ddisk">Disk scheduling</label><select id="ddisk"><option value="sstf">SSTF</option><option value="fcfs">FCFS</option><option value="scan">SCAN</option></select></div><div><label for="dhead">Initial disk head</label><input id="dhead" type="number" value="50" min="0" style="width:90px"></div></div>
  <label for="dreq">Device requests (JSON)</label><textarea id="dreq" class="mono" rows="9" spellcheck="false"></textarea><div class="row"><button class="btn" id="drun">Run device simulation</button><button class="btn ghost" id="dreset">Load baseline</button></div><div id="dnout" style="margin-top:12px"></div>`,
@@ -677,13 +734,14 @@ function show(page){
   document.querySelectorAll("nav button").forEach(b=>{ if(b.dataset.page===page) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current"); });
   $("#main").innerHTML=PAGES[page](); $("#main").focus();
   if(page==="process"){ wireProcess(); }
-  if(page==="overview"){ engineStatus().then(()=>{ for(const k of ["process","memory","file"]){ const e=$("#ov-"+k); if(e) e.textContent=ENGINE&&ENGINE.engine?"Engine connected":"Engine not connected"; } }); }
+  if(page==="overview"){ engineStatus().then(()=>{ for(const k of ["process","memory","file","security","device","network"]){ const e=$("#ov-"+k); if(e) e.textContent=ENGINE&&ENGINE.engine?"Engine connected":"Engine not connected"; } }); }
   if(page==="events"){ const f=()=>{const q=($("#evq").value||"").toLowerCase(),t=$("#evt").value; document.querySelectorAll("#evtab tr[data-s]").forEach(r=>{r.style.display=(!q||r.dataset.s.includes(q))&&(!t||r.dataset.t===t)?"":"none"})}; $("#evq").oninput=f; $("#evt").onchange=f; }
   if(page==="testing"){ $("#tcrun").onclick=runChecks; }
   if(page==="memory"){ wireMemory(); }
   if(page==="file"){ wireFile(); }
   if(page==="integration"){ wireIntegration(); }
   if(page==="device"||page==="network"){ wireDeviceNetwork(); }
+  if(page==="security"){ wireSecurity(); }
   if(page==="export"){ document.querySelectorAll("[data-ex]").forEach(b=>b.onclick=()=>EXPORTS[+b.dataset.ex][3]()); }
   if(page==="scenario"){ const sel=i=>{document.querySelectorAll("[role=tab]").forEach(t=>t.setAttribute("aria-selected",t.dataset.tab==i)); $("#tabbody").innerHTML=TABS[i]();
      if(i==0){ $("#addrow").onclick=()=>{$("#tabbody table").insertAdjacentHTML("beforeend",`<tr><td contenteditable>P5</td><td contenteditable>4</td><td contenteditable>-2</td><td contenteditable>1</td></tr>`)};
