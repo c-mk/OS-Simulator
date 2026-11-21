@@ -1,0 +1,6 @@
+[
+  {"id":"disk-1","pid":"P1","device":"disk","at":0,"cylinder":90},
+  {"id":"disk-2","pid":"P2","device":"disk","at":0,"cylinder":55},
+  {"id":"printer-1","pid":"P3","device":"printer","at":2},
+  {"id":"keyboard-1","pid":"P1","device":"keyboard","at":3}
+]

@@ -1,0 +1,13 @@
+{
+  "operations": [
+    {"action": "login", "user": "alice", "at": 0},
+    {"action": "access", "user": "alice", "resource": "files", "permission": "read", "at": 1},
+    {"action": "access", "user": "alice", "resource": "files", "permission": "delete", "at": 2},
+    {"action": "logout", "user": "alice", "at": 3},
+    {"action": "login", "user": "guest", "at": 4},
+    {"action": "access", "user": "guest", "resource": "network", "permission": "write", "at": 5},
+    {"action": "login", "user": "intruder", "at": 6},
+    {"action": "login", "user": "intruder", "at": 7},
+    {"action": "login", "user": "intruder", "at": 8}
+  ]
+}

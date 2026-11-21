@@ -1,0 +1,52 @@
+{
+  "csv": "pid,arrival,burst,priority\nP1,0,8,3\nP2,1,4,1",
+  "policy": "fcfs",
+  "q": 4,
+  "cs": 0,
+  "aging": 0,
+  "seed": 42,
+  "memory": {
+    "traces": {"P1": "0x0000\n0x1000\n0x0000\n0x2000", "P2": "0x0000\n0x1000"},
+    "page_size": 4096,
+    "frames": 3,
+    "policy": "lru",
+    "hit_ticks": 1,
+    "fault_ticks": 10,
+    "interval_ticks": 10
+  },
+  "files": {
+    "requests": [{"pid": "P1", "cmd": "mkdir", "args": ["/shared"], "at_ms": 1}],
+    "principals": {"P1": "alice"},
+    "setup": [{"path": "/", "mode": "775", "group": "staff"}]
+  },
+  "security": {
+    "operations": [
+      {"action": "login", "user": "alice", "at": 0},
+      {"action": "access", "user": "alice", "resource": "files", "permission": "read", "at": 1},
+      {"action": "access", "user": "alice", "resource": "files", "permission": "delete", "at": 2}
+    ]
+  },
+  "device": {
+    "queue_policy": "priority",
+    "disk_policy": "sstf",
+    "requests": [
+      {"id": "disk-1", "pid": "P1", "device": "disk", "at": 0, "cylinder": 90, "priority": 1},
+      {"id": "printer-1", "pid": "P2", "device": "printer", "at": 2, "priority": 2},
+      {"id": "keyboard-1", "pid": "P1", "device": "keyboard", "at": 3, "priority": 1}
+    ]
+  },
+  "network": {
+    "queue_policy": "fifo",
+    "nodes": ["A", "B", "C", "D"],
+    "links": [
+      {"from": "A", "to": "B", "delay": 4, "capacity": 2},
+      {"from": "B", "to": "C", "delay": 4, "capacity": 2},
+      {"from": "A", "to": "D", "delay": 2, "capacity": 2},
+      {"from": "D", "to": "C", "delay": 2, "capacity": 2}
+    ],
+    "packets": [
+      {"id": "PKT1", "source": "A", "destination": "C", "at": 0, "priority": 1},
+      {"id": "PKT2", "source": "B", "destination": "D", "at": 1, "priority": 3}
+    ]
+  }
+}
