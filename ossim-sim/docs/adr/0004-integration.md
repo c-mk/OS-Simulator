@@ -27,3 +27,7 @@ waiting for the Security, Device and Network managers.
   block at the same time. The result carries a warning when that happens.
 * Each manager serves one request at a time; a request that arrives during a service waits for it.
 * A request issued while its process is not on the CPU is accepted but produces a warning.
+
+## Milestone 4 early six-manager aggregation
+
+`POST /api/scenario/run` reuses the initial Process/Memory/File integration and runs Security, Device and Network scenarios alongside it. The endpoint merges all resulting event records by tick and manager tie-break order and returns per-manager snapshots and metrics. This is an early aggregation milestone, not yet a single controller-owned event simulation: device/network/security completion events do not currently block or unblock processes, and security decisions are not yet enforced as a gate on every device/network operation. The known boundaries are tracked in `docs/milestone4_defects.md`.

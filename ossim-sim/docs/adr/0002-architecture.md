@@ -26,3 +26,17 @@ Cross-manager features (blocking, cleanup) are integration work owned by Rasheed
 
 Data flow for the integration demo: workload CSV -> Process Manager -> Gantt -> `refs_from_gantt` -> Memory Manager;
 file requests -> File Manager; the three event lists merge into one log and a blocked-interval list for the dashboard.
+
+
+## Milestone 4 update
+
+| Component | Files | Notes |
+| --- | --- | --- |
+| Security manager | `ossim/managers/security/manager.py` | Role-based users, active sessions, permission checks, alerts, append-only audit records and exports; see `docs/security_manager.md`. |
+| Device manager | `ossim/managers/device/` | Disk, printer and keyboard queues; FCFS/Priority and disk FCFS/SSTF/SCAN; failure injection and metrics. |
+| Network manager | `ossim/managers/network/` | Nodes, links, packet routing, FIFO/Priority, delay, finite buffers, link failure and metrics. |
+| Server routes | `ossim/ui/security_api.py`, `device_api.py`, `network_api.py`, `scenario_api.py`, `__main__.py` | Security, device and network APIs plus `/api/scenario/run` for the early six-manager scenario. |
+| Dashboard | `ossim/ui/prototype/index.html` | Six manager workspaces, security audit/alert view, device/network simulations and six-manager event aggregation. |
+| Quality and demo | `tests/unit/test_security_manager.py`, `tests/unit/test_security_api.py`, `tests/integration/test_ui_api_m5.py`, `docs/milestone4_demo.md` | Independent manager/API checks and a repeatable demonstration. |
+
+The six-manager endpoint currently aggregates independently executed manager results into a shared ordered event stream. It does not yet implement full controller-mediated blocking or cross-manager authorization enforcement for device/network mutations; see `docs/milestone4_defects.md`.
