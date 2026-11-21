@@ -1,0 +1,14 @@
+{
+  "nodes":["A","B","C","D"],
+  "links":[
+    {"from":"A","to":"B","delay":4,"capacity":2},
+    {"from":"B","to":"C","delay":4,"capacity":2},
+    {"from":"A","to":"D","delay":2,"capacity":2},
+    {"from":"D","to":"C","delay":2,"capacity":2}
+  ],
+  "packets":[
+    {"id":"PKT1","source":"A","destination":"C","at":0,"priority":1},
+    {"id":"PKT2","source":"B","destination":"D","at":1,"priority":3},
+    {"id":"PKT3","source":"A","destination":"B","at":2,"priority":2}
+  ]
+}
